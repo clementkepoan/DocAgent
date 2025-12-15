@@ -1,0 +1,38 @@
+name: doc-agent
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+  - git
+  - gitpython
+  - numpy
+  - scipy
+  - scikit-learn
+  - chromadb
+  - pyyaml
+  - tqdm
+  - rich
+
+  - pip:
+      # LangChain ecosystem
+      - langchain
+      - langchain-community
+      - langchain-openai
+      - langgraph
+
+      # Tree-sitter (WORKS on osx-arm64 via pip)
+      - tree-sitter
+      - tree-sitter-languages
+
+      # Embeddings
+      - sentence-transformers
+
+      # OpenAI
+      - openai
+      - tiktoken
+
+      # Utilities
+      - watchdog
