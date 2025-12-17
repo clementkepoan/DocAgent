@@ -36,3 +36,7 @@ dependencies:
 
       # Utilities
       - watchdog
+
+      # Parser visualization
+      - networkx
+      - matplotlib
