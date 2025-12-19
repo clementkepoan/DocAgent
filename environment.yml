@@ -40,3 +40,7 @@ dependencies:
       # Parser visualization
       - networkx
       - matplotlib
+
+      - python-dotenv
+
+

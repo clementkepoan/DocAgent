@@ -22,5 +22,5 @@ Code:
 Write a short module-level description.
 """
 
-    state["draft_doc"] = llm.generate(prompt)
+    state["draft_doc"] = "Code:" #placeholder to make it stop
     return state
