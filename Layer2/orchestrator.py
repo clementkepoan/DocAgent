@@ -44,20 +44,27 @@ if __name__ == "__main__":
     analyzer.analyze()
 
     topo_order = analyzer.get_sorted_by_dependency(reverse=False)
+    final_docs = {}
 
     for module in topo_order:
         dependencies = analyzer.get_dependencies(module)
-        print(f"Module '{module}' depends on: {dependencies}")
 
-    initial_state: AgentState = {
-        "file": "auth.py",
-        "code_chunks": [],
-        "dependency_docs": ["database.py manages DB connection"],
-        "draft_doc": None,
-        "review_passed": False
-    }
+        state: AgentState = {
+            "file": module,
+            "dependencies": dependencies,
+            "code_chunks": [],
+            "dependency_docs": [
+                final_docs[d] for d in dependencies if d in final_docs
+            ],
+            "draft_doc": None,
+            "review_passed": False,
+        }
 
-    final_state = app.invoke(initial_state)
+        
+        
 
-    #print("\n✅ FINAL DOC OUTPUT:")
-    #print(final_state["draft_doc"])
+        result = app.invoke(state)
+        final_docs[module] = result["draft_doc"] #finaldocs indexed by module name
+        print(f"Final doc for {module}:\n{result['draft_doc']}\n{'-'*40}\n")
+
+

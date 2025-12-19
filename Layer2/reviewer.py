@@ -3,12 +3,11 @@ from .schemas import AgentState
 def review(state: AgentState) -> AgentState:
     print("🧪 Reviewer running")
 
-    doc = state["draft_doc"]
+    
 
-    # Simple validation rule
-    if doc and "Code:" in doc:
-        state["review_passed"] = True
-    else:
-        state["review_passed"] = False
+    #placeholder logic: always pass review
+    state["review_passed"] = True
+    
 
     return state
+#Later need to inject LLM based review logic (CODE + DOCS COMPARISON)
