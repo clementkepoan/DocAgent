@@ -1,8 +1,12 @@
 from langgraph.graph import StateGraph, END
-from schemas import AgentState
-from retriever import retrieve
-from writer import write
-from reviewer import review
+from .schemas import AgentState
+from .retriever import retrieve
+from .writer import write
+from .reviewer import review
+from layer1.parser import ImportGraph
+
+
+
 
 def review_router(state: AgentState):
     if state["review_passed"]:
@@ -33,6 +37,18 @@ def build_graph():
 if __name__ == "__main__":
     app = build_graph()
 
+
+    ROOT_PATH = "/Users/mulia/Desktop/Projects/CodebaseAI/Dummy"
+
+    analyzer = ImportGraph(ROOT_PATH)
+    analyzer.analyze()
+
+    topo_order = analyzer.get_sorted_by_dependency(reverse=False)
+
+    for module in topo_order:
+        dependencies = analyzer.get_dependencies(module)
+        print(f"Module '{module}' depends on: {dependencies}")
+
     initial_state: AgentState = {
         "file": "auth.py",
         "code_chunks": [],
@@ -43,5 +59,5 @@ if __name__ == "__main__":
 
     final_state = app.invoke(initial_state)
 
-    print("\n✅ FINAL DOC OUTPUT:")
-    print(final_state["draft_doc"])
+    #print("\n✅ FINAL DOC OUTPUT:")
+    #print(final_state["draft_doc"])

@@ -1,4 +1,4 @@
-from schemas import AgentState
+from .schemas import AgentState
 
 def retrieve(state: AgentState) -> AgentState:
     print("🔍 Retriever running")

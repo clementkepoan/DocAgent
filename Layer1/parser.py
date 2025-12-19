@@ -367,22 +367,31 @@ class ImportGraph:
     def _detect_cycles(self) -> List[List[str]]:
         G = self.to_networkx()
         return [list(c) for c in nx.simple_cycles(G)]
+    
+
+    def get_dependencies(self, module: str) -> List[str]:
+        """
+        Return direct dependency modules for a given module.
+        """
+        return sorted(self.imports.get(module, []))
+
 
 
 if __name__ == "__main__":
     analyzer = ImportGraph("/Users/mulia/Desktop/Projects/CodebaseAI/Layer2")
 
     analyzer.analyze()
+    #print(analyzer.get_dependencies("orchestrator"))
     analyzer.print_summary()
 
-    sorted_files = analyzer.print_sorted_dependencies(reverse=False)
+    #sorted_files = analyzer.print_sorted_dependencies(reverse=False)
 
     try:
         analyzer.visualize("import_graph.png", highlight_cycles=True)
     except ImportError:
         print("\nNote: Install networkx and matplotlib for visualization: pip install networkx matplotlib")
 
-    print("\nImport chain for 'app' (showing dependencies):")
-    chain = analyzer.get_import_chain("app")
-    for item in chain:
-        print(item)
+    #print("\nImport chain for 'app' (showing dependencies):")
+    #chain = analyzer.get_import_chain("app")
+    #for item in chain:
+    #    print(item)
