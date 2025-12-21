@@ -1,21 +1,127 @@
 File: database
 
 Module Documentation for database:
-This module provides a `Database` class that maintains a simple binary connection state. The class tracks a `connected` flag, which is initialized to `False`. It offers a `connect` method to set this flag to `True`, and an `is_connected` method to query its current value. The implementation does not include resource management, error handling, or a disconnect method. It models only the basic operations of setting and checking a connection status.
+This module provides a `Database` class that tracks connection s
+tate using a boolean flag. The class includes methods to set the connection status and to check the 
+current state. It does not implement actual database communication or network operations.
+
+
+
+================================================================================
+File: layer1.parser
+
+Module Documentation for layer1.parser:
+The `layer1.parser` module provides the `ImportGraph` class
+ for analyzing Python import dependencies within a project directory. It builds a directed graph (ed
+ges: importer → imported) by scanning the filesystem to index local modules and parsing import state
+ments via AST analysis, resolving them only to other locally indexed modules. The class can detect c
+ircular dependencies, generate topological sort orders (handling cycles gracefully), and produce vis
+ualizations that highlight cycles. It ignores `__pycache__` directories and empty `__init__.py` file
+s during indexing.
+
+
+
+================================================================================
+File: layer2.schemas
+
+Module Documentation for layer2.schemas:
+This module defines a TypedDict schema for tracking the st
+ate of a documentation generation process. The `AgentState` structure contains fields for the target
+ file, its dependencies, retrieved code chunks, loaded dependency documentation, and a draft of the 
+generated documentation. It also includes fields to manage a review status, such as approval flag, r
+eviewer suggestions, and a retry counter. This schema serves as a passive data container to organize
+ information flow between different stages of the documentation pipeline.
+
+
+
+================================================================================
+File: layer2.llmprovider
+
+Module Documentation for layer2.llmprovider:
+This module provides a concrete implementation for gen
+erating text completions using the DeepSeek API via the OpenAI client library. It encapsulates the s
+pecific configuration details, including the hardcoded API endpoint and model name. The implementati
+on includes a placeholder comment indicating dummy behavior, suggesting the actual API call may be s
+imulated or under development. Its primary responsibility is to centralize the DeepSeek-specific int
+eraction logic within a single class interface.
+
 
 
 ================================================================================
 File: auth
 
 Module Documentation for auth:
-This module provides a single authentication function, `login_user`, which validates user credentials against a hardcoded pair. It depends on the `database` module to establish a connection before performing the check. The function returns `True` only if the database connection is successful **and** the provided username and password exactly match "admin" and "password". If the database connection fails, the function returns `False`. This implementation is a minimal demonstration and lacks real-world security features like encryption, user management, or configurable credentials.
+This module provides a simple user authentication function. It depen
+ds on the `database` module's `Database` class interface to create a connection. The function return
+s `False` if the database connection check fails; otherwise, it performs a hardcoded credential chec
+k for the username "admin" and password "password". The module manages its own `Database` instance a
+nd connection lifecycle.
+
+
+
+================================================================================
+File: layer2.retriever
+
+Module Documentation for layer2.retriever:
+The `layer2.retriever` module extracts code chunks (func
+tions and classes) from a specified Python file. It uses the file indexing capability of `layer1.par
+ser`'s `ImportGraph` to locate the file within the project directory, employing a caching mechanism 
+for performance. If the file is not found or contains a syntax error, it handles these cases by sett
+ing the state's `code_chunks` to an empty list or the full source, respectively. The module operates
+ by mutating the provided `AgentState` dictionary, directly updating its `code_chunks` key with the 
+retrieved content.
+
+
+
+================================================================================
+File: layer2.reviewer
+
+Module Documentation for layer2.reviewer:
+This module implements an automated reviewer for AI-gener
+ated module documentation. It constructs a detailed evaluation prompt using the source code, depende
+ncies, and a documentation draft, then delegates the actual review to an LLM provider. The module pa
+rses the LLM's structured JSON response to determine if the draft passes review and extracts actiona
+ble suggestions. Its responsibility is to orchestrate this review process by preparing the context a
+nd updating the shared `AgentState` with the outcome.
+
+
+
+================================================================================
+File: layer2.writer
+
+Module Documentation for layer2.writer:
+This module constructs a prompt and requests the generation
+ of module-level documentation using the `layer2.llmprovider` interface. It formats the source code,
+ dependencies, and any reviewer feedback into a structured instruction for the LLM. The prompt expli
+citly directs the LLM to avoid re-documenting dependency functionality and to focus on the unique re
+sponsibilities of the target module. The resulting LLM response is then stored as the final document
+ation draft in the agent's state.
+
 
 
 ================================================================================
 File: app
 
 Module Documentation for app:
-This module provides a simple command-line interface for user authentication. It collects a username and password via standard input and passes them to the `login_user` function from the `auth` module for validation. The validation process includes checking a database connection, as required by the `auth` module's implementation. Based on the result, the program outputs a success or failure message. This module serves as a front-end client that depends entirely on the `auth` module for the actual authentication logic and its underlying database dependency.
+This module implements a command-line interface for a simple user aut
+hentication flow. It prompts the user for credentials and passes them to an authentication function 
+imported from the `auth` module. Based on the boolean result of this authentication check, it prints
+ a corresponding success or failure message to the console. Its responsibility is to orchestrate thi
+s user interaction and display the outcome.
+
+
+
+================================================================================
+File: layer2.orchestrator
+
+Module Documentation for layer2.orchestrator:
+This module defines the workflow for generating modul
+e documentation by constructing a state graph that sequences the `layer2` components. It orchestrate
+s the pipeline by first retrieving code, then writing a draft, and finally submitting it for review.
+ The conditional routing logic in `review_router` determines whether to accept the draft, loop back 
+for a rewrite (up to a maximum retry limit), or terminate the process. Its sole responsibility is to
+ define this graph structure and its execution flow.
+
 
 
 ================================================================================

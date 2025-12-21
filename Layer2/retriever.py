@@ -25,7 +25,7 @@ def retrieve(state: AgentState) -> AgentState:
     print("🔍 Retriever running")
 
     module_name = state["file"]
-    root_path = Path("/Users/mulia/Desktop/Projects/CodebaseAI/Dummy")
+    root_path = state["ROOT_PATH"]
     
     # Get the analyzer with folder structure
     analyzer = get_analyzer(root_path)

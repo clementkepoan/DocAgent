@@ -1,11 +1,11 @@
 from langgraph.graph import StateGraph, END
-from .schemas import AgentState
-from .retriever import retrieve
-from .writer import write
-from .reviewer import review
+from layer2.schemas import AgentState
+from layer2.retriever import retrieve
+from layer2.writer import write
+from layer2.reviewer import review
 from layer1.parser import ImportGraph
 
-MAX_RETRIES = 3
+MAX_RETRIES = 2
 
 def review_router(state: AgentState):
     
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     app = build_graph()
 
 
-    ROOT_PATH = "/Users/mulia/Desktop/Projects/CodebaseAI/Dummy"
+    ROOT_PATH = "/Users/mulia/Desktop/Projects/CodebaseAI/"
 
     analyzer = ImportGraph(ROOT_PATH)
     analyzer.analyze()
@@ -67,6 +67,7 @@ if __name__ == "__main__":
             "review_passed": False,
             "reviewer_suggestions": None,
             "retry_count": 0,
+            "ROOT_PATH": ROOT_PATH,
         }
 
         
@@ -77,10 +78,12 @@ if __name__ == "__main__":
         print(f"Final doc for {module}:\n{result['draft_doc']}\n{'-'*40}\n")
 
     # Make a final output of all docs in output.txt
-    with open("output_3_retries.txt", "w") as f:
+    with open("output_2_retries.txt", "w") as f:
         for module, doc in final_docs.items():
             f.write(f"File: {module}\n")
-            f.write(doc)
+            n = 100
+            formatted_doc = "\n".join([doc[i:i+n] for i in range(0, len(doc), n)])
+            f.write(formatted_doc + "\n")
             f.write("\n" + "="*80 + "\n")
     
 

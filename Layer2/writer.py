@@ -58,15 +58,15 @@ Language: python
 Reviewer Suggestion:
 {reviewer_suggestions}
 
-Write a clear module-level description in 4-5 sentences.
+Write a clear module-level description in 3-4 sentences.
 """
 
     #print(f"📝 Writer prompt:\n{prompt}\n")
-    print(f"Reviewer Suggestions in writer: \n {reviewer_suggestions}")
+    #print(f"Reviewer Suggestions in writer: \n {reviewer_suggestions}")
 
     response = llm.generate(prompt)
 
-    print(f"📝 Writer response:\n{response}\n")
+    #print(f"📝 Writer response:\n{response}\n")
 
     state["draft_doc"] = f"""
 Module Documentation for {file}:

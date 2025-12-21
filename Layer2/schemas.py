@@ -27,3 +27,5 @@ class AgentState(TypedDict):
     #reviewr max retry
     retry_count: int
 
+    ROOT_PATH: str
+
