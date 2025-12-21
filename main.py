@@ -5,7 +5,7 @@ from layer2.writer import write
 from layer2.reviewer import review
 from layer1.parser import ImportGraph
 
-MAX_RETRIES = 2
+MAX_RETRIES = 1
 
 def review_router(state: AgentState):
     
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     app = build_graph()
 
 
-    ROOT_PATH = "/Users/mulia/Desktop/Projects/CodebaseAI/"
+    ROOT_PATH = "./backend/"
 
     analyzer = ImportGraph(ROOT_PATH)
     analyzer.analyze()
