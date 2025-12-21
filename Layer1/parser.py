@@ -247,6 +247,11 @@ class ImportGraph:
         - foo.py => "foo"
         - pkg/__init__.py => "pkg"
         - pkg/utils.py => "pkg.utils"
+        
+        For folders WITHOUT __init__.py, modules are treated as top-level
+        (not prefixed with folder name).
+        
+        Skips __pycache__ directories.
         """
         index: Dict[str, Path] = {}
 
@@ -254,17 +259,35 @@ class ImportGraph:
             if not path.is_file():
                 continue
 
+            # Skip __pycache__ directories
+            if "__pycache__" in path.parts:
+                continue
+
             rel = path.relative_to(self.root_folder)
 
             # package module
             if rel.name == "__init__.py":
+                # Skip if __init__.py is empty or only has comments
+                content = path.read_text(encoding="utf-8").strip()
+                if not content or content.startswith("#"):
+                    continue
+                
                 mod = ".".join(rel.parent.parts) if rel.parent.parts else ""
                 if mod:
                     index[mod] = path
                 continue
 
-            # normal module
-            mod = ".".join(rel.with_suffix("").parts)
+            # Check if parent directory is a package (has __init__.py)
+            parent_dir = path.parent
+            has_init = (parent_dir / "__init__.py").exists()
+            
+            if has_init and parent_dir != self.root_folder:
+                # It's a proper package - use full dotted path
+                mod = ".".join(rel.with_suffix("").parts)
+            else:
+                # It's a loose module - just use the filename (not the folder prefix)
+                mod = rel.with_suffix("").name
+            
             index[mod] = path
 
         return index
@@ -378,13 +401,16 @@ class ImportGraph:
 
 
 if __name__ == "__main__":
-    analyzer = ImportGraph("/Users/mulia/Desktop/Projects/CodebaseAI/Layer2")
+    analyzer = ImportGraph("/Users/mulia/Desktop/Projects/CodebaseAI/")
 
     analyzer.analyze()
     #print(analyzer.get_dependencies("orchestrator"))
     analyzer.print_summary()
 
-    #sorted_files = analyzer.print_sorted_dependencies(reverse=False)
+    sorted_files = analyzer.print_sorted_dependencies(reverse=False)
+
+    print(analyzer.get_dependencies("app"))
+
 
     try:
         analyzer.visualize("import_graph.png", highlight_cycles=True)

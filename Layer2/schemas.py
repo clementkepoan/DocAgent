@@ -20,3 +20,10 @@ class AgentState(TypedDict):
 
     # did reviewer approve?
     review_passed: bool
+
+    #for reviewer
+    reviewer_suggestions: str
+
+    #reviewr max retry
+    retry_count: int
+

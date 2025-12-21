@@ -1,0 +1,21 @@
+File: database
+
+Module Documentation for database:
+This module provides a simple `Database` class for managing a database connection state. The class tracks whether a connection has been established using a boolean flag. It offers methods to explicitly connect and to check the current connection status. This implementation serves as a basic abstraction for connection management without actual network or database driver logic.
+
+
+================================================================================
+File: auth
+
+Module Documentation for auth:
+This module provides a single authentication function, `login_user`, which validates user credentials. It is responsible for instantiating and managing its own `Database` connection, creating a new instance and explicitly calling `connect()` to establish a session. The function verifies the connection is active before proceeding. The core authentication logic is a placeholder, performing a simple hard-coded check against the username "admin" and password "password". Its primary purpose is to demonstrate a structure where authentication depends on a successful, internally-managed database connection.
+
+
+================================================================================
+File: app
+
+Module Documentation for app:
+This module provides a simple command-line interface for user authentication. It acts as a front-end client that collects username and password credentials from standard input. The module delegates the core authentication logic entirely to the imported `auth.login_user` function. Its sole responsibility is to handle user interaction, call the authentication service, and display the success or failure result to the user. It contains no business logic or data validation of its own.
+
+
+================================================================================

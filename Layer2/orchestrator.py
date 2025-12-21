@@ -5,14 +5,21 @@ from .writer import write
 from .reviewer import review
 from layer1.parser import ImportGraph
 
-
-
+MAX_RETRIES = 3
 
 def review_router(state: AgentState):
+    
+
     if state["review_passed"]:
         return END
-    else:
-        return "write"
+
+    if state["retry_count"] >= MAX_RETRIES:
+        print("⚠️ Max retries reached. Accepting best-effort doc.")
+        return END
+
+    return "write"
+
+
 
 def build_graph():
     graph = StateGraph(AgentState)
@@ -58,6 +65,8 @@ if __name__ == "__main__":
             ],
             "draft_doc": None,
             "review_passed": False,
+            "reviewer_suggestions": None,
+            "retry_count": 0,
         }
 
         
@@ -66,5 +75,13 @@ if __name__ == "__main__":
         result = app.invoke(state)
         final_docs[module] = result["draft_doc"] #finaldocs indexed by module name
         print(f"Final doc for {module}:\n{result['draft_doc']}\n{'-'*40}\n")
+
+    # Make a final output of all docs in output.txt
+    with open("output_3_retries.txt", "w") as f:
+        for module, doc in final_docs.items():
+            f.write(f"File: {module}\n")
+            f.write(doc)
+            f.write("\n" + "="*80 + "\n")
+    
 
 

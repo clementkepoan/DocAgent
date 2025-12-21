@@ -1,0 +1,21 @@
+File: database
+
+Module Documentation for database:
+This module provides a `Database` class that maintains a simple binary connection state. The class tracks a `connected` flag, which is initialized to `False`. It offers a `connect` method to set this flag to `True`, and an `is_connected` method to query its current value. The implementation does not include resource management, error handling, or a disconnect method. It models only the basic operations of setting and checking a connection status.
+
+
+================================================================================
+File: auth
+
+Module Documentation for auth:
+This module provides a single authentication function, `login_user`, which validates user credentials against a hardcoded pair. It depends on the `database` module to establish a connection before performing the check. The function returns `True` only if the database connection is successful **and** the provided username and password exactly match "admin" and "password". If the database connection fails, the function returns `False`. This implementation is a minimal demonstration and lacks real-world security features like encryption, user management, or configurable credentials.
+
+
+================================================================================
+File: app
+
+Module Documentation for app:
+This module provides a simple command-line interface for user authentication. It collects a username and password via standard input and passes them to the `login_user` function from the `auth` module for validation. The validation process includes checking a database connection, as required by the `auth` module's implementation. Based on the result, the program outputs a success or failure message. This module serves as a front-end client that depends entirely on the `auth` module for the actual authentication logic and its underlying database dependency.
+
+
+================================================================================
