@@ -345,34 +345,76 @@ class ImportGraph:
             print(f"Error parsing {file_path}: {e}")
             return
 
+        # Extract package path for fallback resolution (e.g., "backend.idm_vton" from "backend.idm_vton.apply_net")
+        module_parts = module_name.split(".")
+        package_prefix = ".".join(module_parts[:-1]) if len(module_parts) > 1 else None
+        
+        def resolve_with_fallback(dotted_path: str) -> Optional[str]:
+            """Try absolute resolution, then package-relative fallback"""
+            # 1. Try absolute (standard case)
+            resolved = self._resolve_absolute_module(dotted_path)
+            if resolved:
+                return resolved
+            
+            # 2. Fallback: try resolving relative to importer's package
+            # If importer is "backend.idm_vton.apply_net" and import is "detectron2.config",
+            # try "backend.idm_vton.detectron2.config"
+            if package_prefix:
+                candidate = f"{package_prefix}.{dotted_path}"
+                resolved = self._resolve_absolute_module(candidate)
+                if resolved:
+                    return resolved
+            
+            return None
+
         for node in ast.walk(tree):
             # import x, import x.y
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    resolved = self._resolve_absolute_module(alias.name)
+                    resolved = resolve_with_fallback(alias.name)
                     if resolved:
                         self.imports[module_name].add(resolved)
 
-            # from x import y  / from .x import y / from . import y
+            # from x import y / from .x import y / from . import y
             elif isinstance(node, ast.ImportFrom):
-                abs_base = self._resolve_from_import_base(module_name, node)
-                if not abs_base:
-                    continue
-
-                # Prefer submodule if it exists locally: from pkg import utils => pkg.utils
-                for alias in node.names:
-                    # skip star imports for dependency edges (optional)
-                    if alias.name == "*":
-                        # treat as base dependency only
-                        resolved = self._resolve_absolute_module(abs_base)
-                        if resolved:
-                            self.imports[module_name].add(resolved)
+                if node.level == 0 and node.module:  # Absolute from-import
+                    # Resolve the base module with fallback
+                    resolved_base = resolve_with_fallback(node.module)
+                    if not resolved_base:
                         continue
 
-                    candidate = f"{abs_base}.{alias.name}"
-                    resolved = self._resolve_absolute_module(candidate) or self._resolve_absolute_module(abs_base)
-                    if resolved:
-                        self.imports[module_name].add(resolved)
+                    for alias in node.names:
+                        if alias.name == "*":
+                            self.imports[module_name].add(resolved_base)
+                            continue
+
+                        # Try submodule first (e.g., "densepose.vis.base.CompoundVisualizer")
+                        candidate = f"{resolved_base}.{alias.name}"
+                        resolved = self._resolve_absolute_module(candidate)
+                        if resolved:
+                            self.imports[module_name].add(resolved)
+                        else:
+                            # Just add the base module (e.g., "densepose.vis.base")
+                            self.imports[module_name].add(resolved_base)
+                            
+                else:  # Relative imports (level > 0)
+                    # Existing relative import logic remains unchanged
+                    abs_base = self._resolve_from_import_base(module_name, node)
+                    if not abs_base:
+                        continue
+                    
+                    for alias in node.names:
+                        if alias.name == "*":
+                            resolved = self._resolve_absolute_module(abs_base)
+                            if resolved:
+                                self.imports[module_name].add(resolved)
+                            continue
+                        
+                        candidate = f"{abs_base}.{alias.name}"
+                        resolved = self._resolve_absolute_module(candidate) or \
+                                self._resolve_absolute_module(abs_base)
+                        if resolved:
+                            self.imports[module_name].add(resolved)
 
         # Remove self-loop if any
         self.imports[module_name].discard(module_name)
@@ -473,7 +515,7 @@ class ImportGraph:
 
 
 if __name__ == "__main__":
-    analyzer = ImportGraph("./backend/")
+    analyzer = ImportGraph("./")
 
     analyzer.analyze()
     #print(analyzer.get_dependencies("orchestrator"))

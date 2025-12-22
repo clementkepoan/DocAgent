@@ -5,17 +5,13 @@ from .schemas import AgentState
 from layer1.parser import ImportGraph
 
 
-# Cache the analyzer to avoid rebuilding on every call
-_analyzer_cache = None
 
-def get_analyzer(root_path: Path) -> ImportGraph:
-    """Get or create a cached ImportGraph analyzer."""
-    global _analyzer_cache
-    if _analyzer_cache is None:
-        _analyzer_cache = ImportGraph(str(root_path))
-        # Build the module index without analyzing imports
-        _analyzer_cache.module_index = _analyzer_cache._build_module_index()
-    return _analyzer_cache
+
+def name_to_path(name: str, root_path: Path) -> Path:
+    """Convert file name to filepath , by converting dots to slashes and adding .py"""
+    parts = name.split(".")
+    return root_path.joinpath(*parts).with_suffix(".py")
+    
 
 
 def retrieve(state: AgentState) -> AgentState:
@@ -27,15 +23,13 @@ def retrieve(state: AgentState) -> AgentState:
     module_name = state["file"]
     root_path = state["ROOT_PATH"]
     
-    # Get the analyzer with folder structure
-    analyzer = get_analyzer(root_path)
+    
     
     # Look up the file path
-    file_path = analyzer.module_index.get(module_name)
+    file_path = name_to_path(module_name, Path(root_path))
     
     if not file_path or not file_path.exists():
         print(f"⚠️ File not found for module: {module_name}")
-        print(f"   Available modules: {list(analyzer.module_index.keys())}")
         state["code_chunks"] = []
         return state
 
