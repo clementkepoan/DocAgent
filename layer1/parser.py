@@ -20,8 +20,13 @@ class ImportGraph:
         self.cycles: List[List[str]] = []
 
         # Local module index built from filesystem:
-        # e.g. {"auth": ".../auth.py", "pkg.utils": ".../pkg/utils.py", "pkg": ".../pkg/__init__.py"}
+        # e.g. {"auth": ".../auth.py", "pkg.utils": ".../pkg/utils.py"}
         self.module_index: Dict[str, Path] = {}
+
+        # Local packages
+        self.package_to_modules: Dict[str, Set[str]] = {}  # NEW
+        self.packages: Set[str] = set()  # NEW
+
 
     # -----------------------------
     # Public API
@@ -32,11 +37,22 @@ class ImportGraph:
 
         # Build module index once (no heuristics)
         self.module_index = self._build_module_index()
-        print(f"Indexed {len(self.module_index)} local modules/packages")
+        print(f"Indexed {len(self.module_index)} local modules")
+        # for mod in self.module_index:
+        #     print(mod)
+            
+        print(f"Indexed {len(self.packages)} local packages")
+        # print(self.packages)
+
+        # for pkg in self.package_to_modules:
+        #     print(pkg, self.package_to_modules[pkg])
 
         # Parse imports for each local module
         for module_name, file_path in self.module_index.items():
             self._parse_imports(module_name, file_path)
+
+        # for mod in self.imports:
+        #     print(mod, self.imports[mod])
 
         # Build imported_by map
         self._build_imported_by()
@@ -55,67 +71,74 @@ class ImportGraph:
                 G.add_edge(importer, imported)
         return G
 
-    def topo_order_independent_first(self) -> List[str]:
-        """
-        Returns modules from most independent -> most dependent (dependencies first).
-        Since our edges are importer->imported (dependent->dependency), we topo sort on reversed graph.
-        """
-        G = self.to_networkx()
-        try:
-            return list(nx.topological_sort(G.reverse()))
-        except nx.NetworkXUnfeasible:
-            # cycles exist; return a stable node list
-            return list(G.nodes)
-
     # def topo_order_independent_first(self) -> List[str]:
     #     """
     #     Returns modules from most independent -> most dependent (dependencies first).
-    #     Sorting key:
-    #     1. Topological constraint: A module can only appear after all modules it imports are already in the list
-    #     2. Import count (ascending): Among eligible modules, those with fewer imports come first
-    #     3. Deterministic tie-break: If import counts are equal, sort by module name
+    #     Since our edges are importer->imported (dependent->dependency), we topo sort on reversed graph.
     #     """
-    #     # Calculate remaining dependencies for each module
-    #     remaining_deps = {module: len(deps) for module, deps in self.imports.items()}
+    #     G = self.to_networkx()
+    #     try:
+    #         return list(nx.topological_sort(G.reverse()))
+    #     except nx.NetworkXUnfeasible:
+    #         # cycles exist; return a stable node list
+    #         return list(G.nodes)
+
+    def topo_order_independent_first(self) -> List[str]:
+        """
+        Returns modules from most independent -> most dependent (dependencies first).
+        Sorting key:
+        1. Topological constraint: A module can only appear after all modules it imports are already in the list
+        2. Import count (ascending): Among eligible modules, those with fewer imports come first
+        3. Imported_by count (descending): Among eligible modules with same import count, 
+        those with more imported_by count come first
+        4. Deterministic tie-break: If imported_by counts are equal, sort by module name
+        """
+        # Calculate remaining dependencies for each module
+        remaining_deps = {module: len(deps) for module, deps in self.imports.items()}
         
-    #     # Priority queue: (import_count, module_name)
-    #     # Modules become eligible when remaining_deps == 0, and are sorted by import count
-    #     heap = []
+        # Priority queue: (import_count, -imported_by_count, module_name)
+        # Modules become eligible when remaining_deps == 0
+        # Sorting: fewer imports first, then more importers first, then alphabetical
+        heap = []
         
-    #     # Seed heap with modules that have no dependencies
-    #     for module in self.imports:
-    #         if remaining_deps[module] == 0:
-    #             heappush(heap, (len(self.imports[module]), module))
+        # Seed heap with modules that have no dependencies
+        for module in self.imports:
+            if remaining_deps[module] == 0:
+                import_count = len(self.imports[module])
+                imported_by_count = len(self.imported_by.get(module, []))
+                heappush(heap, (import_count, -imported_by_count, module))
         
-    #     result = []
-    #     visited = set()
+        result = []
+        visited = set()
         
-    #     # Process modules in dependency-respecting priority order
-    #     while heap:
-    #         import_count, module = heappop(heap)
+        # Process modules in dependency-respecting priority order
+        while heap:
+            import_count, neg_imported_by, module = heappop(heap)
             
-    #         if module in visited:
-    #             continue
+            if module in visited:
+                continue
                 
-    #         result.append(module)
-    #         visited.add(module)
+            result.append(module)
+            visited.add(module)
             
-    #         # Update all importers that depend on this module
-    #         for importer in self.imported_by.get(module, []):
-    #             if importer in remaining_deps:  # Only consider local modules
-    #                 remaining_deps[importer] -= 1
+            # Update all importers that depend on this module
+            for importer in self.imported_by.get(module, []):
+                if importer in remaining_deps:  # Only consider local modules
+                    remaining_deps[importer] -= 1
                     
-    #                 # When all dependencies satisfied, add to queue
-    #                 if remaining_deps[importer] == 0:
-    #                     heappush(heap, (len(self.imports[importer]), importer))
+                    # When all dependencies satisfied, add to queue
+                    if remaining_deps[importer] == 0:
+                        imp_import_count = len(self.imports[importer])
+                        imp_imported_by_count = len(self.imported_by.get(importer, []))
+                        heappush(heap, (imp_import_count, -imp_imported_by_count, importer))
         
-    #     # Append any remaining modules (in cycles) in deterministic order
-    #     if len(result) != len(self.imports):
-    #         remaining = [m for m in self.imports if m not in result]
-    #         remaining.sort()  # Deterministic order for cyclical modules
-    #         result.extend(remaining)
+        # Append any remaining modules (in cycles) in deterministic order
+        if len(result) != len(self.imports):
+            remaining = [m for m in self.imports if m not in result]
+            remaining.sort()  # Deterministic order for cyclical modules
+            result.extend(remaining)
         
-    #     return result
+        return result
 
     def get_sorted_by_dependency(self, reverse: bool = False) -> List[str]:
         """
@@ -163,6 +186,8 @@ class ImportGraph:
         sorted_deps = sorted(self.imports.items(), key=lambda x: len(x[1]), reverse=True)
         for mod, deps in sorted_deps[:10]:
             print(f"  {mod}: {len(deps)} imports")
+
+
 
         if self.cycles:
             print(f"\nCircular Dependencies Found ({len(self.cycles)}):")
@@ -299,91 +324,178 @@ class ImportGraph:
         - pkg/__init__.py => "pkg"
         - pkg/utils.py => "pkg.utils"
         
-        For folders WITHOUT __init__.py, modules are treated as top-level
-        (not prefixed with folder name).
-        
-        Skips __pycache__ directories.
+        Every module gets a full dotted path relative to root.
+        Skips __pycache__ directories and empty __init__.py files.
         """
         index: Dict[str, Path] = {}
+        self.packages = set()
 
         for path in self.root_folder.rglob("*.py"):
-            if not path.is_file():
-                continue
-
             # Skip __pycache__ directories
-            if "__pycache__" in path.parts:
+            if not path.is_file() or "__pycache__" in path.parts:
                 continue
 
             rel = path.relative_to(self.root_folder)
+            # print(rel.name)
 
-            # package module
+            # Handle __init__.py files (they represent the package itself)
             if rel.name == "__init__.py":
-                # Skip if __init__.py is empty or only has comments
+                # Add package into self.packages
+                package_name = ".".join(rel.parent.parts)
+                if package_name:  # Skip root-level __init__.py
+                    self.packages.add(package_name)
+                
+                # Skip empty or comment-only __init__.py files
                 content = path.read_text(encoding="utf-8").strip()
                 if not content or content.startswith("#"):
                     continue
-                
                 mod = ".".join(rel.parent.parts) if rel.parent.parts else ""
                 if mod:
                     index[mod] = path
                 continue
 
-            # Check if parent directory is a package (has __init__.py)
-            parent_dir = path.parent
-            has_init = (parent_dir / "__init__.py").exists()
-            
-            if has_init and parent_dir != self.root_folder:
-                # It's a proper package - use full dotted path
-                mod = ".".join(rel.with_suffix("").parts)
-            else:
-                # It's a loose module - just use the filename (not the folder prefix)
-                mod = rel.with_suffix("").name
-            
+            # For all other .py files, ALWAYS use full dotted path
+            mod = ".".join(rel.with_suffix("").parts)
             index[mod] = path
+        
+        # Initialize with empty sets for each package
+        self.package_to_modules = {pkg: set() for pkg in self.packages}
+        
+        # Assign each module to its direct parent package
+        for module_name in index:
+            # Skip packages themselves - they are not modules of their parent
+            if module_name in self.packages:
+                continue
+                
+            # Find parent package (everything before the last dot)
+            last_dot_pos = module_name.rfind('.')
+            if last_dot_pos == -1:
+                # Top-level module (no parent package)
+                continue
+                
+            parent_package = module_name[:last_dot_pos]
+            
+            # Only add if parent is a recognized package
+            if parent_package in self.packages:
+                self.package_to_modules[parent_package].add(module_name)
 
         return index
 
     def _parse_imports(self, module_name: str, file_path: Path):
         """
-        Parse imports from a file; resolve them ONLY if they map to local modules.
+        Parse imports from a file; resolve them ONLY if they map to local modules/packages.
+        Handles package expansion: importing a package adds all its modules.
         """
         self.imports[module_name] = set()
         self.imported_by.setdefault(module_name, set())
 
         try:
-            tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+            content = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=str(file_path))
         except Exception as e:
             print(f"Error parsing {file_path}: {e}")
             return
 
+        # Helper: Check if path exists EXACTLY (no parent matching)
+        def exists_locally(dotted: str) -> bool:
+            """Return True if dotted path is a local module or package."""
+            return dotted in self.module_index or dotted in self.packages
+
+        # Helper: Resolve dotted path to most specific local target
+        def resolve_dotted_path(dotted: str) -> Optional[str]:
+            """Try 'a.b.c', then 'a.b', then 'a' - but only if they exist."""
+            parts = dotted.split(".")
+            for i in range(len(parts), 0, -1):
+                candidate = ".".join(parts[:i])
+                if exists_locally(candidate):
+                    return candidate
+            return None
+
+        # Helper: Record import with package expansion
+        def record_import(importer: str, target: str):
+            """Record that importer imports target, expanding packages."""
+            if target in self.packages:
+                self.imports[importer].update(self.package_to_modules.get(target, set()))
+            elif target in self.module_index:
+                self.imports[importer].add(target)
+
+        # Extract importer's package context for fallback
+        module_parts = module_name.split(".")
+        package_prefix = ".".join(module_parts[:-1]) if len(module_parts) > 1 else None
+
+        def try_resolve_absolute(dotted_path: str) -> Optional[str]:
+            """Try resolving as absolute path only."""
+            return resolve_dotted_path(dotted_path) if exists_locally(dotted_path) else None
+
+        def try_resolve_fallback(dotted_path: str) -> Optional[str]:
+            """Try package-relative resolution (e.g., 'pkg.os')."""
+            if not package_prefix:
+                return None
+            candidate = f"{package_prefix}.{dotted_path}"
+            return resolve_dotted_path(candidate) if exists_locally(candidate) else None
+
+        # Process all import nodes
         for node in ast.walk(tree):
-            # import x, import x.y
             if isinstance(node, ast.Import):
+                # Conditions 1-3: import module/package
                 for alias in node.names:
-                    resolved = self._resolve_absolute_module(alias.name)
+                    # Try absolute first, then fallback
+                    resolved = try_resolve_absolute(alias.name) or try_resolve_fallback(alias.name)
                     if resolved:
-                        self.imports[module_name].add(resolved)
+                        record_import(module_name, resolved)
 
-            # from x import y  / from .x import y / from . import y
             elif isinstance(node, ast.ImportFrom):
-                abs_base = self._resolve_from_import_base(module_name, node)
-                if not abs_base:
-                    continue
-
-                # Prefer submodule if it exists locally: from pkg import utils => pkg.utils
-                for alias in node.names:
-                    # skip star imports for dependency edges (optional)
-                    if alias.name == "*":
-                        # treat as base dependency only
-                        resolved = self._resolve_absolute_module(abs_base)
-                        if resolved:
-                            self.imports[module_name].add(resolved)
+                if node.level == 0:  # Absolute from-import
+                    if not node.module:
                         continue
-
-                    candidate = f"{abs_base}.{alias.name}"
-                    resolved = self._resolve_absolute_module(candidate) or self._resolve_absolute_module(abs_base)
-                    if resolved:
-                        self.imports[module_name].add(resolved)
+                    
+                    # Resolve the source module/package
+                    resolved_base = try_resolve_absolute(node.module) or try_resolve_fallback(node.module)
+                    if not resolved_base:
+                        continue
+                    
+                    for alias in node.names:
+                        if alias.name == "*":
+                            # Conditions 6-7: from x import *
+                            record_import(module_name, resolved_base)
+                            continue
+                        
+                        # Try resolving submodule
+                        candidate = f"{resolved_base}.{alias.name}"
+                        resolved_sub = resolve_dotted_path(candidate)
+                        if resolved_sub:
+                            # Conditions 4-5: from pkg import submodule
+                            record_import(module_name, resolved_sub)
+                        else:
+                            # Conditions 8-9: from pkg/module import name
+                            # Record source only (no expansion)
+                            if resolved_base in self.module_index or resolved_base in self.packages:
+                                self.imports[module_name].add(resolved_base)
+                
+                else:  # Relative imports (level > 0)
+                    abs_base = self._resolve_from_import_base(module_name, node)
+                    if not abs_base:
+                        continue
+                    
+                    resolved_base = resolve_dotted_path(abs_base)
+                    if not resolved_base:
+                        continue
+                    
+                    for alias in node.names:
+                        if alias.name == "*":
+                            # Condition 13: from . import *
+                            record_import(module_name, resolved_base)
+                            continue
+                        
+                        candidate = f"{abs_base}.{alias.name}"
+                        resolved_sub = resolve_dotted_path(candidate)
+                        if resolved_sub:
+                            # Conditions 10-12, 14: relative submodule imports
+                            record_import(module_name, resolved_sub)
+                        else:
+                            # Importing a name from relative base
+                            if resolved_base in self.module_index or resolved_base in self.packages:
+                                self.imports[module_name].add(resolved_base)
 
         # Remove self-loop if any
         self.imports[module_name].discard(module_name)
@@ -449,10 +561,42 @@ class ImportGraph:
         """
         return sorted(self.imports.get(module, []))
 
+    def print_module_structure(self):
+            """
+            Print module structure using EXACTLY the same logic
+            as _build_module_index (no re-scanning).
+            """
+
+            if not self.module_index:
+                print("⚠️ Module index is empty. Run analyze() first.")
+                return
+
+            # Build a tree from module names
+            tree = {}
+
+            for module in self.module_index.keys():
+                parts = module.split(".")
+                node = tree
+                for part in parts:
+                    node = node.setdefault(part, {})
+
+            def walk(node: dict, prefix: str = "", is_last: bool = True):
+                keys = list(node.keys())
+                for i, key in enumerate(keys):
+                    last = i == len(keys) - 1
+                    connector = "└── " if last else "├── "
+                    print(prefix + connector + key)
+
+                    extension = "    " if last else "│   "
+                    walk(node[key], prefix + extension, last)
+
+            print("\n📦 Module Structure (derived from module_index)")
+            walk(tree)
+
 
 
 if __name__ == "__main__":
-    analyzer = ImportGraph("./backend/")
+    analyzer = ImportGraph("./")
 
     analyzer.analyze()
     #print(analyzer.get_dependencies("orchestrator"))
@@ -460,9 +604,9 @@ if __name__ == "__main__":
 
     sorted_files = analyzer.print_sorted_dependencies(reverse=False)
 
-    print(analyzer.get_dependencies("app"))
+    print(analyzer.get_dependencies("idm_vton.preprocess.humanparsing.mhp_extension.detectron2.detectron2.modeling.proposal_generator.rrpn"))
 
-
+    analyzer.print_module_structure()
     try:
         analyzer.visualize("import_graph.png", highlight_cycles=True)
     except ImportError:
