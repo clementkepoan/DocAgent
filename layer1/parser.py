@@ -27,6 +27,12 @@ class ImportGraph:
         self.package_to_modules: Dict[str, Set[str]] = {}  # NEW
         self.packages: Set[str] = set()  # NEW
 
+        #Package metadata
+        self.module_metadata: Dict[str, Dict] = {}
+        self.package_metadata: Dict[str, Dict] = {}
+
+
+
 
     # -----------------------------
     # Public API
@@ -223,97 +229,6 @@ class ImportGraph:
         dfs(start_file, 0)
         return chain
 
-    def visualize(self, output_file: str = "import_graph.png", highlight_cycles: bool = True):
-        """
-        Arrow points from importer → imported.
-        """
-        G = self.to_networkx()
-        if len(G.nodes) == 0:
-            print("No imports to visualize.")
-            return
-
-        plt.figure(figsize=(14, 10))
-        pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
-
-        cycle_edges = set()
-        if highlight_cycles and self.cycles:
-            for cycle in self.cycles:
-                for i in range(len(cycle)):
-                    cycle_edges.add((cycle[i], cycle[(i + 1) % len(cycle)]))
-
-        regular_edges = [(u, v) for u, v in G.edges() if (u, v) not in cycle_edges]
-
-        if regular_edges:
-            nx.draw_networkx_edges(
-                G, pos,
-                edgelist=regular_edges,
-                edge_color='#4a90e2',
-                width=1.5,
-                arrows=True,
-                arrowsize=20,
-                arrowstyle='->',
-                connectionstyle="arc3,rad=0.1",
-                alpha=0.7,
-                node_size=2000
-            )
-
-        if cycle_edges:
-            nx.draw_networkx_edges(
-                G, pos,
-                edgelist=list(cycle_edges),
-                edge_color='#e74c3c',
-                width=2.5,
-                arrows=True,
-                arrowsize=30,
-                arrowstyle='->',
-                connectionstyle="arc3,rad=0.2",
-                alpha=0.9,
-                node_size=2000
-            )
-
-        node_colors = []
-        for node in G.nodes():
-            if any(node in cycle for cycle in self.cycles):
-                node_colors.append('#ffcccc')
-            else:
-                node_colors.append('#e6f2ff')
-
-        nx.draw_networkx_nodes(
-            G, pos,
-            node_color=node_colors,
-            node_size=2500,
-            edgecolors='#333333',
-            linewidths=1.5
-        )
-
-        nx.draw_networkx_labels(
-            G, pos,
-            font_size=9,
-            font_weight='bold',
-            font_family='sans-serif'
-        )
-
-        plt.title(
-            "Python Import Dependencies (Arrow points from importer → imported)",
-            fontsize=14,
-            fontweight='bold',
-            pad=20
-        )
-
-        legend_elements = [
-            plt.Line2D([0], [0], color='#4a90e2', lw=2, label='Normal Import'),
-            plt.Line2D([0], [0], color='#e74c3c', lw=2, label='Circular Import'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#ffcccc',
-                       markersize=10, label='Module in Cycle')
-        ]
-        plt.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1))
-
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=300, bbox_inches='tight')
-        print(f"Visualization saved to {output_file}")
-        print(f"→ Arrows indicate direction: [importer] → [imported module]")
-
     # -----------------------------
     # Internal helpers
     # -----------------------------
@@ -378,6 +293,33 @@ class ImportGraph:
             # Only add if parent is a recognized package
             if parent_package in self.packages:
                 self.package_to_modules[parent_package].add(module_name)
+
+        
+
+        # -----------------------------
+        # Build metadata (FACTS ONLY)
+        # -----------------------------
+
+        # Module metadata
+        for module_name, path in index.items():
+            parts = module_name.split(".")
+            self.module_metadata[module_name] = {
+                "depth": len(parts) - 1,
+                "is_root_module": len(parts) == 1,
+                "file_path": str(path),
+                "parent_package": ".".join(parts[:-1]) if len(parts) > 1 else None,
+            }
+
+        # Package metadata
+        for pkg in self.packages:
+            pkg_parts = pkg.split(".")
+            self.package_metadata[pkg] = {
+                "depth": len(pkg_parts) - 1,
+                "is_root_package": len(pkg_parts) == 1,
+                "module_count": len(self.package_to_modules.get(pkg, [])),
+                "path": str(self.root_folder.joinpath(*pkg_parts)),
+            }
+
 
         return index
 
@@ -596,7 +538,7 @@ class ImportGraph:
 
 
 if __name__ == "__main__":
-    analyzer = ImportGraph("./")
+    analyzer = ImportGraph("./sourcecode")
 
     analyzer.analyze()
     #print(analyzer.get_dependencies("orchestrator"))
@@ -607,12 +549,4 @@ if __name__ == "__main__":
     print(analyzer.get_dependencies("idm_vton.preprocess.humanparsing.mhp_extension.detectron2.detectron2.modeling.proposal_generator.rrpn"))
 
     analyzer.print_module_structure()
-    try:
-        analyzer.visualize("import_graph.png", highlight_cycles=True)
-    except ImportError:
-        print("\nNote: Install networkx and matplotlib for visualization: pip install networkx matplotlib")
-
-    #print("\nImport chain for 'app' (showing dependencies):")
-    #chain = analyzer.get_import_chain("app")
-    #for item in chain:
-    #    print(item)
+    
