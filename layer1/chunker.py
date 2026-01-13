@@ -39,6 +39,7 @@ class CodeChunker:
             except Exception as e:
                 print(f"⚠️ Skipping {file_path}: {e}")
         
+        print(f"\n✅ Generated {len(all_chunks)} chunks")
         return all_chunks
     
     def _chunk_single_file(self, module_name: str, file_path: Path, content: str) -> List[Dict]:
@@ -167,7 +168,7 @@ if __name__ == "__main__":
     chunks = chunker.extract_chunks()
     
     # 3. Verify output
-    print(f"\n✅ Generated {len(chunks)} chunks")
+    # print(f"\n✅ Generated {len(chunks)} chunks")
     
     # Print first 3 chunks as samples
     for i, chunk in enumerate(chunks[:3]):

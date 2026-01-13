@@ -39,15 +39,15 @@ class ImportGraph:
     # -----------------------------
     def analyze(self):
         """Main analysis method"""
-        print(f"Scanning folder: {self.root_folder}")
+        # print(f"Scanning folder: {self.root_folder}")
 
         # Build module index once (no heuristics)
         self.module_index = self._build_module_index()
-        print(f"Indexed {len(self.module_index)} local modules")
+        print(f"✅ Indexed {len(self.module_index)} local modules")
         # for mod in self.module_index:
         #     print(mod)
             
-        print(f"Indexed {len(self.packages)} local packages")
+        print(f"✅ Indexed {len(self.packages)} local packages")
         # print(self.packages)
 
         # for pkg in self.package_to_modules:
@@ -66,7 +66,7 @@ class ImportGraph:
         # Detect cycles
         self.cycles = self._detect_cycles()
 
-        print(f"Analysis complete. Found {len(self.cycles)} circular dependencies.")
+        print(f"✅ Analysis complete. Found {len(self.cycles)} circular dependencies.")
 
     def to_networkx(self) -> nx.DiGraph:
         """Graph direction: importer -> imported (matches your arrow meaning)."""
