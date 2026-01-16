@@ -1,0 +1,16 @@
+================================================================================
+FOLDER-LEVEL DOCUMENTATION
+================================================================================
+
+FOLDER: Dummy copy
+--------------------------------------------------------------------------------
+This folder is a self-contained, dummy authentication package for testing or prototyping, simulating a login system with a hardcoded credential check. Its modules are loosely coupled internally but depend on two external imports, making it potentially unstable to external changes. The package follows a simple separation of concerns with distinct modules for authentication logic, dummy database simulation, and a CLI entry point.
+
+================================================================================
+
+FOLDER: .
+--------------------------------------------------------------------------------
+This folder serves as the root-level package for a simple authentication application, coordinating user login, database connectivity, and command-line interaction through its three modules. Its role in the broader architecture is as a self-contained application layer that depends on two external libraries, making it potentially unstable due to this external coupling. The modules follow a clear separation of concerns—auth for business logic, database for persistence, and main for user interface—with no internal dependencies, indicating low cohesion within the package itself.
+
+================================================================================
+

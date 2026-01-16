@@ -14,7 +14,7 @@ def parse_review_json(text: str) -> dict:
         raise ValueError(f"Failed to parse reviewer JSON: {e}\nRaw text:\n{text}")
 
 def review(state: AgentState) -> AgentState:
-    print("🧪 Reviewer running")
+    # print("🧪 Reviewer running")
 
     file = state["file"]
     code = state["code_chunks"]

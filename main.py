@@ -1,20 +1,24 @@
 from langgraph.graph import StateGraph, END
 from layer2.schemas import AgentState
 from layer2.retriever import retrieve
-from layer2.writer import write
+from layer2.writer import module_write, folder_write, condenser_write
 from layer2.reviewer import review
 from layer1.parser import ImportGraph
+from tqdm import tqdm
+import time
+
+
 
 MAX_RETRIES = 1
 
-def review_router(state: AgentState):
+def review_router(state: AgentState) -> str:
     
 
     if state["review_passed"]:
         return END
 
     if state["retry_count"] >= MAX_RETRIES:
-        print("⚠️ Max retries reached. Accepting best-effort doc.")
+        # print("⚠️ Max retries reached. Accepting best-effort doc.")
         return END
 
     return "write"
@@ -26,7 +30,7 @@ def build_graph():
 
     # Register nodes
     graph.add_node("retrieve", retrieve)
-    graph.add_node("write", write)
+    graph.add_node("write", module_write)
     graph.add_node("review", review)
 
     # Entry point
@@ -42,18 +46,24 @@ def build_graph():
     return graph.compile()
 
 if __name__ == "__main__":
+    print("\n" + "="*80)
+    print("🚀 DocAgent Runnning yeee")
+    print("="*80 + "\n")
+    
     app = build_graph()
 
+    ROOT_PATH = "./"
 
-    ROOT_PATH = "./backend/"
-
+    print("📊 Analyzing codebase structure...")
     analyzer = ImportGraph(ROOT_PATH)
     analyzer.analyze()
+    print(f"✓ Found {len(analyzer.module_index)} modules\n")
 
     topo_order = analyzer.get_sorted_by_dependency(reverse=False)
     final_docs = {}
 
-    for module in topo_order:
+    print("📝 Generating module documentation...\n")
+    for module in tqdm(topo_order, desc="Modules", unit="module", colour="blue"):
         dependencies = analyzer.get_dependencies(module)
 
         state: AgentState = {
@@ -70,21 +80,29 @@ if __name__ == "__main__":
             "ROOT_PATH": ROOT_PATH,
         }
 
-        
-        
-
         result = app.invoke(state)
-        final_docs[module] = result["draft_doc"] #finaldocs indexed by module name
-        print(f"Final doc for {module}:\n{result['draft_doc']}\n{'-'*40}\n")
+        final_docs[module] = result["draft_doc"]
+    
+    print("\n✓ Module documentation complete\n")
 
-    # Make a final output of all docs in output.txt
-    with open("output_2_retries.txt", "w") as f:
-        for module, doc in final_docs.items():
-            f.write(f"File: {module}\n")
-            n = 100
-            formatted_doc = "\n".join([doc[i:i+n] for i in range(0, len(doc), n)])
-            f.write(formatted_doc + "\n")
-            f.write("\n" + "="*80 + "\n")
+    # Generate folder-level documentation
+    print("📁 Generating folder-level documentation...")
+    folder_docs = folder_write(analyzer, final_docs)
+    print("✓ Folder documentation complete\n")
+    
+    # # Generate comprehensive markdown documentation
+    # print("📚 Generating comprehensive documentation...")
+    # condenser_write(analyzer, final_docs, folder_docs)
+    # print("✓ Comprehensive documentation complete\n")
+    
+    # print("="*80)
+    # print("✨ DOCUMENTATION GENERATION SUCCESSFUL!")
+    # print("="*80)
+    # print("\n📂 Output files:")
+    # print("  - DOCUMENTATION.md (Comprehensive markdown)")
+
+
+
     
 
 

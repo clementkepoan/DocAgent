@@ -1,5 +1,6 @@
 from .schemas import AgentState
 from .llmprovider import LLMProvider
+from layer1.grouper import generate_llm_prompts
 import json
 import re
 
@@ -41,8 +42,9 @@ def format_structured_doc(file: str, doc_data: dict) -> str:
 ---
 """
 
-def write(state: AgentState) -> AgentState:
-    print("✍️ Writer running")
+def module_write(state: AgentState) -> AgentState:
+    """Generate documentation for a single module"""
+    # print("✍️ Writer running")
 
     file = state["file"]
     code = state["code_chunks"]
@@ -50,7 +52,7 @@ def write(state: AgentState) -> AgentState:
     deps_docs = state["dependency_docs"]
     reviewer_suggestions = state["reviewer_suggestions"]
 
-    print(f"deps for {file}: {deps}")
+    #print(f"deps for {file}: {deps}")
 
     dependency_context = (
         "\n\n".join(
@@ -133,4 +135,202 @@ Ensure the JSON is well-formed and parsable.
 
     return state
 
+
+def folder_write(analyzer, final_docs, output_file: str = "output.txt"):
+    """Generate folder-level documentation from module docs"""
+    print("\nGenerating folder-level LLM prompts...\n")
+    folder_prompts = generate_llm_prompts(analyzer, final_docs)
+    
+    folder_docs = {}
+    
+    for prompt_data in folder_prompts:
+        folder_path = prompt_data['folder']
+        prompt = prompt_data['prompt']
+        
+        print(f"Generating description for folder: {folder_path}")
+        description = llm.generate(prompt)
+        folder_docs[folder_path] = description
+        print(f"✓ {folder_path}\n")
+
+    with open(output_file, "w") as f:
+        f.write(folder_docs)
+    
+    return folder_docs
+
+
+def condenser_write(analyzer, final_docs, folder_docs, output_file: str = "DOCUMENTATION.md"):
+    """Condense all documentation into a comprehensive markdown file"""
+    print(f"\n🔄 Condensing all documentation into {output_file}...\n")
+    
+    # Get folder structure for context
+    from layer1.grouper import FolderProcessor
+    processor = FolderProcessor(analyzer)
+    folder_structure = processor.get_folder_structure_str(include_modules=True)
+    
+    # Format all module documentation
+    module_docs_text = "\n".join(final_docs.values())
+    
+    # Format all folder documentation
+    folder_docs_text = "\n".join([
+        f"### {folder_path}\n{description}"
+        for folder_path, description in folder_docs.items()
+    ])
+    
+    # Design comprehensive prompt for final condensing
+    prompt = f"""
+You are a technical documentation expert tasked with creating comprehensive, professional README-style documentation similar to popular GitHub repositories (like React, Vue, TensorFlow, FastAPI, etc.).
+
+CONTEXT & SOURCE MATERIAL
+=========================
+
+PROJECT STRUCTURE:
+{folder_structure}
+
+FOLDER-LEVEL DOCUMENTATION:
+{folder_docs_text}
+
+MODULE-LEVEL DOCUMENTATION:
+{module_docs_text}
+
+TASK
+====
+
+Create a professional, engaging markdown documentation file following modern GitHub README best practices:
+
+**STRUCTURE TO FOLLOW:**
+
+1. **Title & Badges Section**
+   - Project name as main heading
+   - Brief one-line description
+   - Add placeholder badges (version, license, build status, etc.)
+
+2. **Table of Contents**
+   - Clickable links to all major sections
+   - Clean, organized structure
+
+3. **Overview** (2-3 paragraphs)
+   - What the project does
+   - Why it exists / problem it solves
+   - Key features (3-5 bullet points with emojis)
+
+4. **Quick Start** / **Installation**
+   - Clear, copy-paste ready commands
+   - Prerequisites if any
+   - Basic usage example
+
+5. **Architecture** 
+   - High-level architecture diagram description
+   - Core design patterns and principles
+   - Technology stack
+
+6. **Project Structure**
+   - Tree-like folder visualization with explanations
+   - Purpose of each major directory
+   - How components interact
+
+7. **Core Components** / **API Reference**
+   - Organized by folders/modules
+   - For each component:
+     * Purpose and responsibility
+     * Key classes/functions with signatures
+     * Usage examples with code blocks
+     * Important parameters/returns
+
+8. **Key Features & Capabilities**
+   - Detailed feature descriptions
+   - Use cases and examples
+   - Performance characteristics if relevant
+
+9. **Dependencies & Relationships**
+   - Import graph or dependency tree
+   - Module interaction patterns
+   - External dependencies
+
+10. **Development**
+    - How to contribute
+    - Running tests
+    - Project conventions
+
+11. **License** (placeholder)
+    - Standard license section
+
+**STYLE GUIDELINES:**
+
+✅ DO:
+- Use emojis sparingly but effectively (🚀 📦 ⚡ 🔧 📚 🎯 ✨)
+- Write in active, engaging voice
+- Include code examples in ```python blocks
+- Use tables for structured information
+- Add collapsible sections for lengthy content using <details>
+- Use badges and shields at the top
+- Keep sentences concise and scannable
+- Use consistent formatting throughout
+
+❌ DON'T:
+- Write long paragraphs without breaks
+- Use excessive technical jargon without explanation
+- Forget code syntax highlighting
+- Make walls of text - break it up visually
+- Skip practical examples
+
+**FORMATTING EXAMPLES:**
+
+For features:
+```markdown
+### ⚡ Key Features
+
+- 🔥 **Fast Processing** - Optimized algorithms for high-speed execution
+- 📊 **Smart Analysis** - Intelligent code pattern recognition
+- 🎯 **Precise Results** - Accurate dependency tracking
+```
+
+For API documentation:
+```markdown
+#### `function_name(param1, param2)`
+
+**Description:** Brief explanation of what it does
+
+**Parameters:**
+- `param1` (type): Description
+- `param2` (type): Description
+
+**Returns:** What it returns
+
+**Example:**
+\```python
+result = function_name("value", 42)
+print(result)
+\```
+```
+
+For collapsible sections:
+```markdown
+<details>
+<summary>Click to expand detailed information</summary>
+
+Detailed content here...
+
+</details>
+```
+
+**OUTPUT REQUIREMENTS:**
+- Return ONLY the markdown content
+- No preamble or meta-commentary
+- Ready to save as README.md or DOCUMENTATION.md
+- Professional, polished, and visually appealing
+- Should inspire confidence in the project
+- Include realistic placeholder values where specific details are missing
+
+Generate documentation that would make developers excited to use and contribute to this project!
+"""
+
+    print("Generating comprehensive GitHub-style documentation...")
+    condensed_doc = llm.generate(prompt)
+    
+    # Save to file
+    with open(output_file, "w") as f:
+        f.write(condensed_doc)
+    
+    print(f"✓ Comprehensive documentation saved to {output_file}")
+    return condensed_doc
 

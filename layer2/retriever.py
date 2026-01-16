@@ -18,7 +18,7 @@ def retrieve(state: AgentState) -> AgentState:
     """
     Retrieves code chunks from a file using the parser's folder structure.
     """
-    print("🔍 Retriever running")
+    # print("🔍 Retriever running")
 
     module_name = state["file"]
     root_path = state["ROOT_PATH"]
@@ -33,7 +33,7 @@ def retrieve(state: AgentState) -> AgentState:
         state["code_chunks"] = []
         return state
 
-    print(f"📄 Reading file: {file_path}")
+    # print(f"📄 Reading file: {file_path}")
 
     source = file_path.read_text(encoding="utf-8")
 
@@ -66,6 +66,6 @@ def retrieve(state: AgentState) -> AgentState:
 
     state["code_chunks"] = chunks
 
-    print(f"✅ Retrieved {len(chunks)} code chunks from {module_name}")
+    # print(f"✅ Retrieved {len(chunks)} code chunks from {module_name}")
     
     return state

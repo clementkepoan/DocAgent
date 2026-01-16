@@ -215,18 +215,56 @@ class FolderProcessor:
             
             if include_modules:
                 print(f"{indent}   Files: {', '.join(folder.modules)}")
+    
+    def get_folder_structure_str(self, include_modules: bool = False) -> str:
+        """Return folder structure as a formatted string"""
+        lines = []
+        lines.append("=" * 80)
+        lines.append("FOLDER STRUCTURE")
+        lines.append("=" * 80)
+        
+        for folder in self.get_folders_bottom_up():
+            if folder.file_count == 0:  # Skip pure containers
+                continue
+            
+            indent = "  " * folder.depth
+            pkg_icon = "📦" if folder.is_package else "📁"
+            
+            lines.append("")
+            lines.append(f"{indent}{pkg_icon} {folder.folder_path}/")
+            lines.append(f"{indent}   {folder.file_count} modules")
+            lines.append(f"{indent}   Imports: {folder.external_imports + folder.internal_imports} "
+                        f"({folder.external_imports} external)")
+            lines.append(f"{indent}   Imported by: {folder.imported_by} modules")
+            
+            if folder.sibling_imports > 0 or folder.sibling_importers > 0:
+                lines.append(f"{indent}   Sibling coupling: {folder.sibling_importers}↑ {folder.sibling_imports}↓")
+            
+            if include_modules:
+                lines.append(f"{indent}   Files: {', '.join(folder.modules)}")
+        
+        return "\n".join(lines)
 
 
-def generate_llm_prompts(analyzer: Any) -> List[Dict[str, Any]]:
+def generate_llm_prompts(analyzer: Any, final_docs: Dict[str, str] = None) -> List[Dict[str, Any]]:
     """Generate prompts for all folders bottom-up"""
     processor = FolderProcessor(analyzer)
     prompts = []
+    
+    if final_docs is None:
+        final_docs = {}
     
     for folder in processor.get_folders_bottom_up():
         if folder.file_count == 0:
             continue
         
         context = processor.get_llm_context(folder.folder_path)
+        
+        # Include module descriptions from final_docs
+        module_descriptions = ""
+        for module in sorted(context['modules']):
+            if module in final_docs:
+                module_descriptions += f"\n- {module}: {final_docs[module][:200]}..."
         
         prompt = f"""
 Explain the Python folder `{context['folder_path']}`.
@@ -236,6 +274,7 @@ FILES: {context['file_count']} Python modules
 METRICS: {json.dumps(context['metrics'], indent=2)}
 
 MODULES: {', '.join(context['modules'])}
+MODULE DESCRIPTIONS:{module_descriptions if module_descriptions else " (None generated yet)"}
 
 Describe:
 1. This folder's responsibility and purpose
@@ -269,7 +308,7 @@ def main():
     
     args = parser.parse_args()
     
-    analyzer = ImportGraph(args.root)
+    analyzer = ImportGraph("/Users/mulia/Desktop/Projects/CodebaseAI/Dummy")
     analyzer.analyze()
     
     processor = FolderProcessor(analyzer)
