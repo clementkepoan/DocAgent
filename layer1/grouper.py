@@ -247,7 +247,13 @@ class FolderProcessor:
 
 
 def generate_llm_prompts(analyzer: Any, final_docs: Dict[str, str] = None) -> List[Dict[str, Any]]:
-    """Generate prompts for all folders bottom-up"""
+    """Generate prompts for all folders bottom-up
+    
+    This function is now a thin wrapper around the prompt_router.
+    It maintains backward compatibility by using the same interface.
+    """
+    from layer2.prompt_router import get_folder_documentation_prompt
+    
     processor = FolderProcessor(analyzer)
     prompts = []
     
@@ -266,24 +272,8 @@ def generate_llm_prompts(analyzer: Any, final_docs: Dict[str, str] = None) -> Li
             if module in final_docs:
                 module_descriptions += f"\n- {module}: {final_docs[module][:200]}..."
         
-        prompt = f"""
-Explain the Python folder `{context['folder_path']}`.
-
-SCOPE: {"Root-level package" if not context['parent_path'] else f"Subfolder of {context['parent_path']}"}
-FILES: {context['file_count']} Python modules
-METRICS: {json.dumps(context['metrics'], indent=2)}
-
-MODULES: {', '.join(context['modules'])}
-MODULE DESCRIPTIONS:{module_descriptions if module_descriptions else " (None generated yet)"}
-
-Describe:
-1. This folder's responsibility and purpose
-2. Its role in the broader architecture
-3. Key patterns or abstractions in its modules
-4. Coupling concerns (high external imports = likely unstable)
-
-Answer in 2-3 sentences.
-        """.strip()
+        # Get prompt from centralized router
+        prompt = get_folder_documentation_prompt(context, module_descriptions)
         
         prompts.append({
             "folder": folder.folder_path,
@@ -294,33 +284,3 @@ Answer in 2-3 sentences.
     
     # Sort back to top-down for LLM processing (explain children first)
     return sorted(prompts, key=lambda p: -p['depth'])
-
-
-def main():
-    import argparse
-    import json
-    from layer1.parser import ImportGraph
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument("root", nargs="?", default=".")
-    parser.add_argument("--modules", action="store_true")
-    parser.add_argument("--llm", action="store_true")
-    
-    args = parser.parse_args()
-    
-    analyzer = ImportGraph("/Users/mulia/Desktop/Projects/CodebaseAI/Dummy")
-    analyzer.analyze()
-    
-    processor = FolderProcessor(analyzer)
-    
-    if args.llm:
-        prompts = generate_llm_prompts(analyzer)
-        print(f"\nGenerated {len(prompts)} prompts bottom-up")
-        print(f"First prompt (deepest):\n")
-        print(prompts[0]['prompt'])
-    else:
-        processor.print_summary(include_modules=args.modules)
-
-
-if __name__ == "__main__":
-    main()

@@ -92,57 +92,64 @@ class ImportGraph:
     def topo_order_independent_first(self) -> List[str]:
         """
         Returns modules from most independent -> most dependent (dependencies first).
-        Sorting key:
-        1. Topological constraint: A module can only appear after all modules it imports are already in the list
-        2. Import count (ascending): Among eligible modules, those with fewer imports come first
-        3. Imported_by count (descending): Among eligible modules with same import count, 
-        those with more imported_by count come first
-        4. Deterministic tie-break: If imported_by counts are equal, sort by module name
+        Properly handles cyclic dependencies by:
+        1. Detecting strongly connected components (SCCs)
+        2. Creating a DAG of SCCs
+        3. Topologically sorting SCCs
+        4. Within each SCC, ordering by import count
         """
-        # Calculate remaining dependencies for each module
-        remaining_deps = {module: len(deps) for module, deps in self.imports.items()}
+        import networkx as nx
+        from itertools import chain
         
-        # Priority queue: (import_count, -imported_by_count, module_name)
-        # Modules become eligible when remaining_deps == 0
-        # Sorting: fewer imports first, then more importers first, then alphabetical
-        heap = []
+        # Build the dependency graph
+        G = self.to_networkx()
         
-        # Seed heap with modules that have no dependencies
-        for module in self.imports:
-            if remaining_deps[module] == 0:
-                import_count = len(self.imports[module])
-                imported_by_count = len(self.imported_by.get(module, []))
-                heappush(heap, (import_count, -imported_by_count, module))
+        # Find strongly connected components (SCCs)
+        # Each SCC is a set of nodes that form a cycle (or singleton)
+        sccs = list(nx.strongly_connected_components(G))
         
+        # Create a mapping: node -> SCC index
+        node_to_scc = {}
+        for i, scc in enumerate(sccs):
+            for node in scc:
+                node_to_scc[node] = i
+        
+        # Build a DAG of SCCs (collapsed graph)
+        scc_graph = nx.DiGraph()
+        scc_graph.add_nodes_from(range(len(sccs)))
+        
+        for node in G.nodes():
+            node_scc = node_to_scc[node]
+            for neighbor in G.successors(node):
+                neighbor_scc = node_to_scc[neighbor]
+                if node_scc != neighbor_scc:  # Edge between different SCCs
+                    scc_graph.add_edge(node_scc, neighbor_scc)
+        
+        # Topologically sort the SCC graph
+        # This gives us the order in which to process SCCs
+        try:
+            scc_order = list(nx.topological_sort(scc_graph.reverse()))
+        except nx.NetworkXUnfeasible:
+            # Should never happen since scc_graph is a DAG
+            scc_order = list(range(len(sccs)))
+        
+        # Within each SCC, order modules by:
+        # 1. Import count (ascending) - fewer imports first
+        # 2. Imported_by count (descending) - more importers first
+        # 3. Module name (alphabetical) - deterministic tie-breaker
         result = []
-        visited = set()
         
-        # Process modules in dependency-respecting priority order
-        while heap:
-            import_count, neg_imported_by, module = heappop(heap)
+        for scc_idx in scc_order:
+            scc = sccs[scc_idx]
             
-            if module in visited:
-                continue
-                
-            result.append(module)
-            visited.add(module)
+            # Sort modules within this SCC
+            scc_modules = sorted(scc, key=lambda m: (
+                len(self.imports.get(m, set())),           # Fewer imports first
+                -len(self.imported_by.get(m, set())),      # More importers first
+                m                                           # Alphabetical
+            ))
             
-            # Update all importers that depend on this module
-            for importer in self.imported_by.get(module, []):
-                if importer in remaining_deps:  # Only consider local modules
-                    remaining_deps[importer] -= 1
-                    
-                    # When all dependencies satisfied, add to queue
-                    if remaining_deps[importer] == 0:
-                        imp_import_count = len(self.imports[importer])
-                        imp_imported_by_count = len(self.imported_by.get(importer, []))
-                        heappush(heap, (imp_import_count, -imp_imported_by_count, importer))
-        
-        # Append any remaining modules (in cycles) in deterministic order
-        if len(result) != len(self.imports):
-            remaining = [m for m in self.imports if m not in result]
-            remaining.sort()  # Deterministic order for cyclical modules
-            result.extend(remaining)
+            result.extend(scc_modules)
         
         return result
 
@@ -546,7 +553,7 @@ if __name__ == "__main__":
 
     sorted_files = analyzer.print_sorted_dependencies(reverse=False)
 
-    print(analyzer.get_dependencies("idm_vton.preprocess.humanparsing.mhp_extension.detectron2.detectron2.modeling.proposal_generator.rrpn"))
+    # print(analyzer.get_dependencies("idm_vton.preprocess.humanparsing.mhp_extension.detectron2.detectron2.modeling.proposal_generator.rrpn"))
 
-    analyzer.print_module_structure()
+    # analyzer.print_module_structure()
     
