@@ -14,8 +14,13 @@ def parse_review_json(text: str) -> dict:
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse reviewer JSON: {e}\nRaw text:\n{text}")
 
-def review(state: AgentState) -> AgentState:
-    # print("🧪 Reviewer running")
+import asyncio
+import time
+
+LLM_REVIEW_TIMEOUT = 60  # seconds
+
+async def review(state: AgentState) -> AgentState:
+    # print("🧪 Reviewer running (async)")
 
     file = state["file"]
     code = state["code_chunks"]
@@ -40,12 +45,35 @@ def review(state: AgentState) -> AgentState:
         dependency_context=dependency_context,
         docs_to_review=docs_to_review
     )
-    
-    response = llm.generate(prompt)
-    result = parse_review_json(response)
-    
-    state["reviewer_suggestions"] = result["review_suggestions"]
-    state["review_passed"] = result["review_passed"]
+
+    start = time.time()
+    try:
+        response = await asyncio.wait_for(llm.generate_async(prompt), timeout=LLM_REVIEW_TIMEOUT)
+    except asyncio.TimeoutError:
+        state["reviewer_suggestions"] = f"Review timed out after {LLM_REVIEW_TIMEOUT}s"
+        state["review_passed"] = False
+        state["last_review_time"] = LLM_REVIEW_TIMEOUT
+        state["retry_count"] += 1
+        return state
+    except Exception as e:
+        state["reviewer_suggestions"] = f"Review failed: {e}"
+        state["review_passed"] = False
+        state["last_review_time"] = time.time() - start
+        state["retry_count"] += 1
+        return state
+
+    try:
+        result = parse_review_json(response)
+    except Exception as e:
+        state["reviewer_suggestions"] = f"Failed to parse review response: {e}"
+        state["review_passed"] = False
+        state["last_review_time"] = time.time() - start
+        state["retry_count"] += 1
+        return state
+
+    state["reviewer_suggestions"] = result.get("review_suggestions", "")
+    state["review_passed"] = result.get("review_passed", False)
+    state["last_review_time"] = time.time() - start
     state["retry_count"] += 1
 
     return state

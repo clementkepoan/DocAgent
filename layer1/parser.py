@@ -179,6 +179,14 @@ class ImportGraph:
             importers = len(self.imported_by.get(mod, set()))
             cycle_indicator = " 🔄" if any(mod in c for c in self.cycles) else ""
             print(f"  {i:3d}. {mod:<40s} [imports: {deps:2d}, imported_by: {importers:2d}]{cycle_indicator}")
+            # Show the actual imported module names (local targets only)
+            imports_list = sorted(self.imports.get(mod, []))
+            if imports_list:
+                # Truncate if very long for readability
+                imports_display = ", ".join(imports_list)
+                if len(imports_display) > 200:
+                    imports_display = imports_display[:197] + "..."
+                print(f"       -> imports: {imports_display}")
 
         print("\n" + "=" * 70)
         return sorted_files
@@ -509,6 +517,57 @@ class ImportGraph:
         Return direct dependency modules for a given module.
         """
         return sorted(self.imports.get(module, []))
+
+    def get_sccs(self) -> List[Set[str]]:
+        """
+        Returns all Strongly Connected Components (cycle groups).
+        Each SCC is a set of modules that form a cycle (or singleton if independent).
+        
+        Returns:
+            List of sets, where each set contains modules in a cycle group
+        """
+        import networkx as nx
+        G = self.to_networkx()
+        sccs = list(nx.strongly_connected_components(G))
+        return sccs
+
+    def get_module_scc(self, module: str) -> Optional[Set[str]]:
+        """
+        Returns the SCC (cycle group) containing the given module.
+        Returns None if module is independent (SCC size == 1).
+        
+        Args:
+            module: Module name to look up
+            
+        Returns:
+            Set of modules in the same cycle, or None if independent
+        """
+        import networkx as nx
+        if module not in self.module_index:
+            return None
+        
+        G = self.to_networkx()
+        sccs = list(nx.strongly_connected_components(G))
+        
+        for scc in sccs:
+            if module in scc:
+                # Return None if this is a singleton (independent module)
+                if len(scc) == 1:
+                    return None
+                return scc
+        return None
+
+    def is_in_cycle(self, module: str) -> bool:
+        """
+        Returns True if the module is part of a cycle (SCC size > 1).
+        
+        Args:
+            module: Module name to check
+            
+        Returns:
+            True if module is in a cycle, False if independent
+        """
+        return self.get_module_scc(module) is not None
 
     def print_module_structure(self):
             """
