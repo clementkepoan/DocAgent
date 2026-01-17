@@ -208,7 +208,7 @@ Describe:
 3. Key patterns or abstractions in its modules
 4. Coupling concerns (high external imports = likely unstable)
 
-Answer in 2-3 sentences.
+Answer in 5-7 sentences.
 """
 
 

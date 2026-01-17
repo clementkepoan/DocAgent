@@ -1,0 +1,98 @@
+"""Simplified async documentation generator - main orchestration only."""
+
+import asyncio
+from typing import Dict
+from layer1.parser import ImportGraph
+from layer3.scc_manager import SCCManager
+from layer3.batch_processor import BatchProcessor
+from layer3.output_writer import OutputWriter
+from layer3.progress_reporter import ProgressReporter
+
+
+MAX_CONCURRENT_TASKS = 20
+
+
+class AsyncDocGenerator:
+    """Orchestrates async documentation generation - simplified coordinator."""
+    
+    def __init__(self, root_path: str = "./", output_dir: str = "./output"):
+        self.root_path = root_path
+        self.analyzer = None
+        self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+        
+        # Delegate responsibilities to specialized components
+        self.scc_manager = SCCManager(root_path, self.semaphore)
+        self.batch_processor = BatchProcessor(root_path, None, self.semaphore)
+        self.output_writer = OutputWriter(output_dir)
+        self.reporter = ProgressReporter()
+    
+    async def analyze_codebase(self) -> None:
+        """Analyze codebase structure and detect cycles."""
+        print("📊 Analyzing codebase structure...")
+        self.analyzer = ImportGraph(self.root_path)
+        self.analyzer.analyze()
+        
+        # Update batch processor with analyzer
+        self.batch_processor.analyzer = self.analyzer
+        
+        # Filter to only actual modules, exclude packages
+        self.modules_only = [m for m in self.analyzer.module_index if m not in self.analyzer.packages]
+        
+        cycles = [scc for scc in self.analyzer.get_sccs() if len(scc) > 1]
+        self.reporter.print_analysis_summary(len(self.modules_only), len(self.analyzer.packages), len(cycles))
+    
+    async def run(self) -> Dict[str, str]:
+        """Main orchestration: batch processing by dependency layers."""
+        
+        self.reporter.start()
+        self.reporter.print_header()
+        
+        # Analyze codebase
+        await self.analyze_codebase()
+        
+        # Get modules sorted by dependencies
+        sorted_modules = [m for m in self.analyzer.get_sorted_by_dependency(reverse=False) 
+                         if m not in self.analyzer.packages]
+        total_modules = len(sorted_modules)
+        print(f"📋 Processing {total_modules} modules\n")
+        
+        # Pre-generate all SCC contexts
+        sccs = self.analyzer.get_sccs()
+        scc_contexts = await self.scc_manager.generate_all_scc_contexts(sccs)
+        
+        # Export SCC contexts
+        scc_contexts_dict = self.scc_manager.get_all_contexts()
+        if scc_contexts_dict:
+            self.output_writer.write_scc_contexts(scc_contexts_dict)
+        
+        # Organize modules into dependency batches
+        batches = self.batch_processor.organize_batches(sorted_modules)
+        print(f"📋 Organized into {len(batches)} dependency batches\n")
+        
+        # Process all batches
+        for batch_idx, batch in enumerate(batches, 1):
+            await self.batch_processor.process_batch(batch, batch_idx, len(batches), scc_contexts, self.reporter)
+        
+        # Print summary
+        final_docs = self.batch_processor.final_docs
+        failed_modules = self.batch_processor.failed_modules
+        self.reporter.print_final_summary(len(final_docs), total_modules, failed_modules)
+        
+        return final_docs
+    
+    def write_all_outputs(self, final_docs: Dict[str, str]) -> None:
+        """Write all output files."""
+        if not final_docs or not self.analyzer:
+            return
+        
+        # Module-level docs
+        self.output_writer.write_module_docs(final_docs)
+        
+        # Folder-level docs
+        folder_docs = self.output_writer.write_folder_docs(self.analyzer, final_docs)
+        
+        # Condensed documentation
+        self.output_writer.write_condensed_doc(self.analyzer, final_docs, folder_docs)
+        
+        # Dependency usage log
+        self.output_writer.write_dependency_usage(self.batch_processor.dependency_usage_log)
