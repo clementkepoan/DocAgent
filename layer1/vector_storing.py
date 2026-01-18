@@ -15,7 +15,7 @@ import shutil
 from parser import ImportGraph
 from chunker import CodeChunker
 from hierarchical_chunker import HierarchicalChunker
-from API_embedder import generate_embeddings
+from embedder import generate_embeddings
 
 from sentence_transformers import SentenceTransformer
 
