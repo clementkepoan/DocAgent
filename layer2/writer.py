@@ -146,16 +146,16 @@ async def scc_context_write(scc_modules: list, code_chunks_dict: dict) -> str:
 
 
 def folder_write(analyzer, final_docs, output_file: str = "output.txt"):
-    """Generate folder-level documentation from module docs"""
+    """Generate folder-level documentation from module docs (DEPRECATED - use folder_write_async)"""
     print("\nGenerating folder-level LLM prompts...\n")
     folder_prompts = generate_llm_prompts(analyzer, final_docs)
-    
+
     folder_docs = {}
-    
+
     for prompt_data in folder_prompts:
         folder_path = prompt_data['folder']
         prompt = prompt_data['prompt']
-        
+
         print(f"Generating description for folder: {folder_path}")
         description = llm.generate(prompt)
         folder_docs[folder_path] = description
@@ -163,8 +163,79 @@ def folder_write(analyzer, final_docs, output_file: str = "output.txt"):
 
     with open(output_file, "w") as f:
         json.dump(folder_docs, f, indent=2)
-    
+
     return folder_docs
+
+
+async def folder_write_async(analyzer, final_docs: dict, semaphore: asyncio.Semaphore) -> tuple:
+    """
+    Generate folder-level documentation from module docs (async version).
+
+    Bottom-up approach: Process deepest folders first, then work up.
+    Within each depth level, process folders in parallel.
+
+    Args:
+        analyzer: ImportGraph analyzer with codebase structure
+        final_docs: Dict mapping module names to their documentation
+        semaphore: Semaphore for rate limiting LLM calls
+
+    Returns:
+        (folder_docs, folder_tree) - docs dict and hierarchical tree structure
+    """
+    print("\n📁 Generating folder-level documentation (bottom-up, parallel per level)...\n")
+    folder_prompts = generate_llm_prompts(analyzer, final_docs)
+
+    # Group folders by depth (bottom-up)
+    folders_by_depth = {}
+    for prompt_data in folder_prompts:
+        depth = prompt_data['depth']
+        if depth not in folders_by_depth:
+            folders_by_depth[depth] = []
+        folders_by_depth[depth].append(prompt_data)
+
+    # Sort depths from deepest to shallowest
+    sorted_depths = sorted(folders_by_depth.keys(), reverse=True)
+
+    folder_docs = {}
+    folder_tree = {}  # Store hierarchical structure for condenser
+
+    # Process each depth level sequentially
+    for depth in sorted_depths:
+        level_prompts = folders_by_depth[depth]
+        print(f"  📂 Depth {depth}: {len(level_prompts)} folder(s)")
+
+        # Create task for each folder at this level
+        async def process_folder(prompt_data):
+            folder_path = prompt_data['folder']
+            prompt = prompt_data['prompt']
+            context = prompt_data['context']
+
+            # Use semaphore to respect MAX_CONCURRENT_TASKS
+            async with semaphore:
+                description = await llm.generate_async(prompt)
+
+            return folder_path, description, context
+
+        # Run all folders at this depth in parallel (respecting semaphore)
+        tasks = [process_folder(prompt_data) for prompt_data in level_prompts]
+        results = await asyncio.gather(*tasks)
+
+        # Collect results and build tree structure
+        for folder_path, description, context in results:
+            folder_docs[folder_path] = description
+            print(f"    ✓ {folder_path}")
+
+            # Build tree structure for condenser access
+            folder_tree[folder_path] = {
+                'description': description,
+                'depth': depth,
+                'parent': context.get('parent_path'),
+                'children': list(context.get('child_folders', set())) if 'child_folders' in context else [],
+                'modules': context.get('modules', [])
+            }
+
+    print(f"\n✓ Generated documentation for {len(folder_docs)} folders\n")
+    return folder_docs, folder_tree
 
 
 def condenser_write(analyzer, final_docs, folder_docs, output_file: str = "DOCUMENTATION.md"):

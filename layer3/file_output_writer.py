@@ -1,8 +1,9 @@
 """Handles all file writing operations for documentation output."""
 
 import os
+import asyncio
 from typing import Dict
-from layer2.writer import folder_write, condenser_write
+from layer2.writer import folder_write, folder_write_async, condenser_write
 
 
 class OutputWriter:
@@ -54,14 +55,29 @@ class OutputWriter:
         except Exception as e:
             print(f"⚠️ Failed to write aggregated module docs: {e}\n")
     
-    def write_folder_docs(self, analyzer, final_docs: Dict[str, str]) -> Dict[str, str]:
-        """Generate and write folder-level documentation."""
+    async def write_folder_docs(
+        self,
+        analyzer,
+        final_docs: Dict[str, str],
+        semaphore: asyncio.Semaphore
+    ) -> tuple:
+        """
+        Generate and write folder-level documentation (async version).
+
+        Args:
+            analyzer: ImportGraph analyzer
+            final_docs: Module documentation dict
+            semaphore: Semaphore for rate limiting
+
+        Returns:
+            (folder_docs, folder_tree) for use by condenser
+        """
         print("📁 Generating folder-level documentation...")
         try:
-            # Generate the docs without writing to a JSON file
-            folder_docs = folder_write(analyzer, final_docs)
-            
-            # Write only the human-readable text file
+            # Call async version with semaphore
+            folder_docs, folder_tree = await folder_write_async(analyzer, final_docs, semaphore)
+
+            # Write to file (sync I/O is fine here)
             folder_txt_path = os.path.join(self.output_dir, "Folder Level docum.txt")
             try:
                 with open(folder_txt_path, "w") as ff:
@@ -72,14 +88,16 @@ class OutputWriter:
                 print(f"✓ Folder documentation written to {folder_txt_path}\n")
             except Exception as e:
                 print(f"⚠️ Failed to write folder-level text file: {e}\n")
-            
-            return folder_docs
+
+            return folder_docs, folder_tree
         except Exception as e:
             print(f"⚠️  Folder documentation failed: {e}\n")
-            return {}
+            import traceback
+            traceback.print_exc()
+            return {}, {}
     
     def write_condensed_doc(self, analyzer, final_docs: Dict[str, str], folder_docs: Dict[str, str]) -> None:
-        """Generate and write consolidated condensed documentation."""
+        """Generate and write consolidated condensed documentation (DEPRECATED - use write_condensed_doc_with_planner)."""
         print("📄 Generating consolidated Final Condensed.md ...")
         try:
             condensed_path = os.path.join(self.output_dir, "Final Condensed.md")
@@ -87,6 +105,93 @@ class OutputWriter:
             print(f"✓ Condensed documentation saved to {condensed_path}\n")
         except Exception as e:
             print(f"⚠️  Condensing documentation failed: {e}\n")
+
+    async def write_condensed_doc_with_planner(
+        self,
+        analyzer,
+        final_docs: Dict[str, str],
+        folder_docs: Dict[str, str],
+        folder_tree: dict,
+        semaphore: asyncio.Semaphore
+    ) -> None:
+        """
+        Generate condensed doc using planner agent (replaces old condenser).
+
+        Args:
+            analyzer: ImportGraph analyzer
+            final_docs: Module documentation dict
+            folder_docs: Folder documentation dict
+            folder_tree: Hierarchical folder structure from folder_write_async
+            semaphore: For rate limiting LLM calls
+        """
+        print("📄 Generating documentation with planner agent...")
+
+        try:
+            from layer2.doc_planner import generate_documentation_plan
+            from layer2.plan_reviewer import review_documentation_plan
+            from layer2.plan_executor import execute_documentation_plan
+
+            # Step 1: Generate plan
+            plan = await generate_documentation_plan(
+                analyzer,
+                folder_docs,
+                folder_tree,
+                final_docs,
+                semaphore
+            )
+
+            # Step 2: Review plan with retry loop (up to 2 attempts)
+            MAX_PLAN_RETRIES = 2
+            plan_valid = False
+
+            for attempt in range(MAX_PLAN_RETRIES):
+                valid, feedback = await review_documentation_plan(
+                    plan,
+                    analyzer,
+                    folder_docs,
+                    semaphore
+                )
+
+                if valid:
+                    plan_valid = True
+                    break
+
+                if attempt < MAX_PLAN_RETRIES - 1:
+                    print(f"⚠️  Plan revision needed (attempt {attempt + 1}/{MAX_PLAN_RETRIES}): {feedback[:100]}...")
+                    # Regenerate plan with feedback
+                    plan = await generate_documentation_plan(
+                        analyzer,
+                        folder_docs,
+                        folder_tree,
+                        final_docs,
+                        semaphore,
+                        reviewer_feedback=feedback
+                    )
+                else:
+                    print(f"⚠️  Plan not perfect but proceeding: {feedback[:100]}...")
+
+            # Step 3: Execute plan (generate sections)
+            condensed_doc = await execute_documentation_plan(
+                plan,
+                analyzer,
+                folder_docs,
+                folder_tree,
+                final_docs,
+                semaphore
+            )
+
+            # Write to file
+            condensed_path = os.path.join(self.output_dir, "Final Condensed.md")
+            with open(condensed_path, "w") as f:
+                f.write(condensed_doc)
+
+            print(f"✓ Planned documentation saved to {condensed_path}\n")
+
+        except Exception as e:
+            print(f"⚠️  Planner-based documentation failed: {e}\n")
+            import traceback
+            traceback.print_exc()
+            raise  # Re-raise since we're replacing the old approach
     
     def write_dependency_usage(self, dependency_usage_log: Dict) -> None:
         """Aggregate dependency usage into one file."""

@@ -5,7 +5,7 @@ from typing import Dict
 from layer1.parser import ImportGraph
 from layer3.scc_manager import SCCManager
 from layer3.batch_processor import BatchProcessor
-from layer3.output_writer import OutputWriter
+from layer3.file_output_writer import OutputWriter
 from layer3.progress_reporter import ProgressReporter
 
 
@@ -80,19 +80,29 @@ class AsyncDocGenerator:
         
         return final_docs
     
-    def write_all_outputs(self, final_docs: Dict[str, str]) -> None:
-        """Write all output files."""
+    async def write_all_outputs(self, final_docs: Dict[str, str]) -> None:
+        """Write all output files (async version)."""
         if not final_docs or not self.analyzer:
             return
-        
-        # Module-level docs
+
+        # Module-level docs (sync is fine)
         self.output_writer.write_module_docs(final_docs)
-        
-        # Folder-level docs
-        folder_docs = self.output_writer.write_folder_docs(self.analyzer, final_docs)
-        
-        # Condensed documentation
-        self.output_writer.write_condensed_doc(self.analyzer, final_docs, folder_docs)
-        
-        # Dependency usage log
+
+        # Folder-level docs (now async, parallel per level, bottom-up)
+        folder_docs, folder_tree = await self.output_writer.write_folder_docs(
+            self.analyzer,
+            final_docs,
+            self.semaphore  # Pass existing semaphore
+        )
+
+        # Condensed documentation (now with planner agent)
+        await self.output_writer.write_condensed_doc_with_planner(
+            self.analyzer,
+            final_docs,
+            folder_docs,
+            folder_tree,  # Pass hierarchical structure
+            self.semaphore
+        )
+
+        # Dependency usage log (sync is fine)
         self.output_writer.write_dependency_usage(self.batch_processor.dependency_usage_log)
