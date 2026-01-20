@@ -16,7 +16,7 @@ class LLMProvider:
         self.base_url = "https://api.deepseek.com"
         self.async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)  # Reuse!
         self.sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)        # Reuse!
-    
+
     def generate(self, prompt: str) -> str:
         """Synchronous LLM call"""
         response = self.sync_client.chat.completions.create(
@@ -25,7 +25,7 @@ class LLMProvider:
         )
 
         return response.choices[0].message.content
-    
+
     async def generate_async(self, prompt: str) -> str:
         """Asynchronous LLM call for parallel processing"""
         response = await self.async_client.chat.completions.create(
@@ -38,11 +38,11 @@ class LLMProvider:
     def generate_scc_overview(self, scc_modules: List[str], code_chunks_dict: Dict[str, str]) -> str:
         """
         Generate a high-level coherence overview for a strongly connected component (cycle).
-        
+
         Args:
             scc_modules: List of module names in the cycle
             code_chunks_dict: Dict mapping module names to their source code
-            
+
         Returns:
             High-level overview doc explaining the cycle's collective responsibility and patterns
         """
@@ -95,15 +95,15 @@ Guidelines:
 Ensure the JSON is well-formed and parsable.
 """
         return self.generate(prompt)
-    
+
     async def generate_scc_overview_async(self, scc_modules: List[str], code_chunks_dict: Dict[str, str]) -> str:
         """
         Async version of generate_scc_overview for parallel processing.
-        
+
         Args:
             scc_modules: List of module names in the cycle
             code_chunks_dict: Dict mapping module names to their source code
-            
+
         Returns:
             High-level overview doc explaining the cycle's collective responsibility and patterns
         """
@@ -156,10 +156,3 @@ Guidelines:
 Ensure the JSON is well-formed and parsable.
 """
         return await self.generate_async(prompt)
-
-
-
-
-
-
-

@@ -167,19 +167,20 @@ class FolderProcessor:
         """Get clean context dict for LLM"""
         if folder_path not in self.folders:
             raise KeyError(f"Folder '{folder_path}' not found. Available: {list(self.folders.keys())[:10]}...")
-        
+
         info = self.folders[folder_path]
-        
+
         return {
             "folder_path": info.folder_path,
             "depth": info.depth,
             "is_package": info.is_package,
             "parent_path": info.parent_path,
             "child_count": len(info.child_folders),
-            
+            "child_folders": sorted(info.child_folders),
+
             "file_count": info.file_count,
             "modules": sorted(info.modules),
-            
+
             "metrics": {
                 "external_imports": info.external_imports,
                 "internal_imports": info.internal_imports,
@@ -246,41 +247,59 @@ class FolderProcessor:
         return "\n".join(lines)
 
 
-def generate_llm_prompts(analyzer: Any, final_docs: Dict[str, str] = None) -> List[Dict[str, Any]]:
+def generate_llm_prompts(analyzer: Any, final_docs: Dict[str, str] = None, folder_docs: Dict[str, str] = None) -> List[Dict[str, Any]]:
     """Generate prompts for all folders bottom-up
-    
+
     This function is now a thin wrapper around the prompt_router.
     It maintains backward compatibility by using the same interface.
+
+    Args:
+        analyzer: ImportGraph analyzer with codebase structure
+        final_docs: Dict mapping module names to their documentation
+        folder_docs: Dict mapping folder paths to their documentation (for child folder context)
+
+    Returns:
+        List of prompt data dicts with folder, depth, prompt, and context
     """
-    from layer2.prompt_router import get_folder_documentation_prompt
-    
+    from layer2.prompts.folder_prompts import get_folder_documentation_prompt
+
     processor = FolderProcessor(analyzer)
     prompts = []
-    
+
     if final_docs is None:
         final_docs = {}
-    
+    if folder_docs is None:
+        folder_docs = {}
+
     for folder in processor.get_folders_bottom_up():
         if folder.file_count == 0:
             continue
-        
+
         context = processor.get_llm_context(folder.folder_path)
-        
+
         # Include module descriptions from final_docs
         module_descriptions = ""
         for module in sorted(context['modules']):
             if module in final_docs:
                 module_descriptions += f"\n- {module}: {final_docs[module][:200]}..."
-        
-        # Get prompt from centralized router
-        prompt = get_folder_documentation_prompt(context, module_descriptions)
-        
+
+        # Include child folder descriptions from folder_docs
+        child_folder_descriptions = ""
+        child_folders = context.get('child_folders', [])
+        for child_path in sorted(child_folders):
+            if child_path in folder_docs:
+                child_desc = folder_docs[child_path][:300]
+                child_folder_descriptions += f"\n- {child_path}: {child_desc}..."
+
+        # Get prompt from centralized router with all context
+        prompt = get_folder_documentation_prompt(context, module_descriptions, child_folder_descriptions)
+
         prompts.append({
             "folder": folder.folder_path,
             "depth": folder.depth,
             "prompt": prompt,
             "context": context
         })
-    
+
     # Sort back to top-down for LLM processing (explain children first)
     return sorted(prompts, key=lambda p: -p['depth'])

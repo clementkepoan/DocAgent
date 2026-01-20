@@ -5,9 +5,9 @@ Plan Review Agent
 Validates documentation plans for completeness and coherence.
 """
 
-from .llmprovider import LLMProvider
-from .prompt_router import get_plan_review_prompt
-from .doc_schemas import DocumentationPlan
+from layer2.services.llm_provider import LLMProvider
+from layer2.prompts.plan_prompts import get_plan_review_prompt
+from layer2.schemas.documentation import DocumentationPlan
 import json
 import re
 import asyncio

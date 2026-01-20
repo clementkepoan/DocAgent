@@ -1,6 +1,6 @@
-from .schemas import AgentState
-from .llmprovider import LLMProvider
-from .prompt_router import get_review_prompt
+from layer2.schemas.agent_state import AgentState
+from layer2.services.llm_provider import LLMProvider
+from layer2.prompts.module_prompts import get_review_prompt
 import json
 import re
 
@@ -27,7 +27,7 @@ async def review(state: AgentState) -> AgentState:
     deps = state["dependencies"]
     deps_docs = state["dependency_docs"]
     docs_to_review = state["draft_doc"]
-    
+
     dependency_context = (
         "\n\n".join(
             f"[Dependency Documentation]\n{doc}"
@@ -36,7 +36,7 @@ async def review(state: AgentState) -> AgentState:
         if deps_docs
         else "None"
     )
-    
+
     # Get prompt from centralized router
     prompt = get_review_prompt(
         file=file,

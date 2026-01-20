@@ -4,10 +4,10 @@ import asyncio
 import time
 from typing import List, Dict, Optional, Set
 from tqdm import tqdm
-from layer2.schemas import AgentState
-from layer2.retriever import retrieve
-from layer2.writer import module_write
-from layer2.reviewer import review
+from layer2.schemas.agent_state import AgentState
+from layer2.services.code_retriever import retrieve
+from layer2.module_pipeline.writer import module_write
+from layer2.module_pipeline.reviewer import review
 from layer3.progress_reporter import ProgressReporter
 
 

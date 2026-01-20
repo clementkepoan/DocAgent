@@ -32,5 +32,3 @@ class AgentState(TypedDict):
 
     # Whether this module is part of a cycle (SCC size > 1)
     is_cyclic: bool
-
-

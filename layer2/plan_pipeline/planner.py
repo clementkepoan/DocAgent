@@ -5,9 +5,10 @@ Documentation Planning Agent
 Analyzes codebase structure and generates optimal documentation plan.
 """
 
-from .llmprovider import LLMProvider
-from .prompt_router import get_documentation_plan_prompt
-from .doc_schemas import DocumentationPlan
+from layer2.services.llm_provider import LLMProvider
+from layer2.prompts.plan_prompts import get_documentation_plan_prompt
+from layer2.schemas.documentation import DocumentationPlan
+from layer1.config_reader import ConfigFileReader
 import json
 import re
 import asyncio
@@ -50,12 +51,45 @@ async def generate_documentation_plan(
     # Build codebase summary
     from layer1.grouper import FolderProcessor
     processor = FolderProcessor(analyzer)
-    folder_structure = processor.get_folder_structure_str(include_modules=False)
+    folder_structure = processor.get_folder_structure_str(include_modules=True)  # Changed to True
 
     # Key metrics
     total_modules = len([m for m in analyzer.module_index if m not in analyzer.packages])
     total_folders = len(folder_docs)
     cycles = [scc for scc in analyzer.get_sccs() if len(scc) > 1]
+    
+    # Detect actual CLI frameworks (not just main.py existence)
+    cli_frameworks_detected = []
+    for module_name, file_path in analyzer.module_index.items():
+        try:
+            content = file_path.read_text(encoding='utf-8')
+            if 'import argparse' in content or 'from argparse' in content:
+                cli_frameworks_detected.append('argparse')
+            if 'import click' in content or 'from click' in content:
+                cli_frameworks_detected.append('click')
+            if 'import typer' in content or 'from typer' in content:
+                cli_frameworks_detected.append('typer')
+            if 'import fire' in content or 'from fire' in content:
+                cli_frameworks_detected.append('fire')
+        except:
+            pass
+    
+    has_cli_framework = len(set(cli_frameworks_detected)) > 0
+    cli_framework_names = ', '.join(set(cli_frameworks_detected)) if cli_frameworks_detected else None
+    
+    # Read main.py preview for better context
+    main_py_preview = None
+    main_path = analyzer.module_index.get("main") or analyzer.module_index.get("__main__")
+    if main_path and main_path.exists():
+        try:
+            main_py_preview = main_path.read_text(encoding='utf-8')[:1500]  # First 1500 chars
+        except:
+            pass
+    
+    # Scan for config files
+    config_reader = ConfigFileReader(str(analyzer.root_folder))
+    config_reader.scan()
+    config_files_summary = config_reader.get_summary()
 
     # Build prompt
     prompt = get_documentation_plan_prompt(
@@ -64,8 +98,12 @@ async def generate_documentation_plan(
         total_modules=total_modules,
         total_folders=total_folders,
         cycle_count=len(cycles),
-        has_cli=(analyzer.module_index.get("main") or analyzer.module_index.get("__main__")),
+        has_cli=(main_path is not None),
+        has_cli_framework=has_cli_framework,
+        cli_frameworks=cli_framework_names,
+        main_py_preview=main_py_preview,
         has_tests=any("test" in str(p) for p in analyzer.module_index.values()),
+        config_files=config_files_summary,
         reviewer_feedback=reviewer_feedback
     )
 

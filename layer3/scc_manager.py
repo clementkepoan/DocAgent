@@ -2,9 +2,9 @@
 
 import asyncio
 from typing import Dict, List, Optional, Set
-from layer2.schemas import AgentState
-from layer2.retriever import retrieve
-from layer2.writer import scc_context_write
+from layer2.schemas.agent_state import AgentState
+from layer2.services.code_retriever import retrieve
+from layer2.module_pipeline.writer import scc_context_write
 
 
 class SCCManager:

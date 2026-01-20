@@ -3,7 +3,7 @@
 import os
 import asyncio
 from typing import Dict
-from layer2.writer import folder_write, folder_write_async, condenser_write
+from layer2.services.folder_generator import generate_folder_docs_async
 
 
 class OutputWriter:
@@ -75,7 +75,7 @@ class OutputWriter:
         print("📁 Generating folder-level documentation...")
         try:
             # Call async version with semaphore
-            folder_docs, folder_tree = await folder_write_async(analyzer, final_docs, semaphore)
+            folder_docs, folder_tree = await generate_folder_docs_async(analyzer, final_docs, semaphore)
 
             # Write to file (sync I/O is fine here)
             folder_txt_path = os.path.join(self.output_dir, "Folder Level docum.txt")
@@ -96,15 +96,8 @@ class OutputWriter:
             traceback.print_exc()
             return {}, {}
     
-    def write_condensed_doc(self, analyzer, final_docs: Dict[str, str], folder_docs: Dict[str, str]) -> None:
-        """Generate and write consolidated condensed documentation (DEPRECATED - use write_condensed_doc_with_planner)."""
-        print("📄 Generating consolidated Final Condensed.md ...")
-        try:
-            condensed_path = os.path.join(self.output_dir, "Final Condensed.md")
-            condenser_write(analyzer, final_docs, folder_docs, output_file=condensed_path)
-            print(f"✓ Condensed documentation saved to {condensed_path}\n")
-        except Exception as e:
-            print(f"⚠️  Condensing documentation failed: {e}\n")
+    # Legacy write_condensed_doc REMOVED
+
 
     async def write_condensed_doc_with_planner(
         self,
@@ -127,9 +120,9 @@ class OutputWriter:
         print("📄 Generating documentation with planner agent...")
 
         try:
-            from layer2.doc_planner import generate_documentation_plan
-            from layer2.plan_reviewer import review_documentation_plan
-            from layer2.plan_executor import execute_documentation_plan
+            from layer2.plan_pipeline.planner import generate_documentation_plan
+            from layer2.plan_pipeline.reviewer import review_documentation_plan
+            from layer2.plan_pipeline.executor import execute_documentation_plan
 
             # Step 1: Generate plan
             plan = await generate_documentation_plan(
