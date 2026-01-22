@@ -89,29 +89,61 @@ class GenerationLogger:
 
 def validate_context_sufficiency(section: dict, context_data: str) -> Tuple[bool, str]:
     """
-    Validate if the gathered context is sufficient for the section.
-    
+    Validate context is sufficient for the section type.
+    Different section types have different requirements.
+
     Returns:
         (is_sufficient, warning_message)
     """
-    # Sections that can have minimal context
-    overview_sections = {'overview', 'introduction', 'about', 'summary'}
+    section_style = section.get('style', '').lower()
     section_id = section.get('section_id', '').lower()
     section_title = section.get('title', '').lower()
-    
-    # Check if this is an overview-type section (can have less context)
-    is_overview = any(s in section_id or s in section_title for s in overview_sections)
-    
-    # Check context size
     context_size = len(context_data.strip()) if context_data else 0
-    
+
+    # Check what's actually in the context
+    has_source_code = '```python' in context_data or 'def ' in context_data or 'class ' in context_data
+    has_config = '```\n' in context_data and any(x in context_data.lower() for x in ['requirements', 'dependencies', 'install', 'environment', 'pyproject'])
+    has_structure = '## Folder' in context_data or '📁' in context_data or '📦' in context_data
+
+    # Sections that can have minimal context
+    overview_sections = {'overview', 'introduction', 'about', 'summary', 'contributing'}
+    is_overview = any(s in section_id or s in section_title for s in overview_sections)
+
+    # Tutorial/Quickstart sections NEED source code
+    is_tutorial = (
+        section_style in ['tutorial', 'quickstart'] or
+        'quickstart' in section_id or
+        'quick' in section_id or
+        'quick start' in section_title or
+        'getting started' in section_title
+    )
+
+    if is_tutorial:
+        if not has_source_code:
+            return False, "MISSING SOURCE CODE - Tutorial/Quickstart needs actual code. Add 'entry_points' or 'source:{module}' to required_context."
+        if context_size < 500:
+            return False, f"INSUFFICIENT CONTEXT ({context_size} chars) - Tutorials need substantial code examples"
+
+    # API Reference sections NEED code signatures
+    is_api_docs = section_style == 'api-docs' or 'api' in section_id or 'reference' in section_title
+    if is_api_docs:
+        if not has_source_code:
+            return False, "MISSING API SIGNATURES - API docs need 'api:{module}' or 'source:{module}' in required_context"
+
+    # Installation sections SHOULD have config files
+    is_install = 'install' in section_id or 'setup' in section_id or 'installation' in section_title
+    if is_install:
+        if not has_config and context_size < 200:
+            return True, f"LIMITED CONFIG CONTEXT - Consider adding 'deps' or 'configs' to required_context"
+
+    # General size checks
     if context_size == 0:
-        return False, "NO CONTEXT - Section will be based only on general project info"
+        return False, "NO CONTEXT - Section based only on inference (high hallucination risk)"
     elif context_size < 100 and not is_overview:
-        return False, f"MINIMAL CONTEXT ({context_size} chars) - May produce generic content"
-    elif context_size < 500 and not is_overview:
-        return True, f"LIMITED CONTEXT ({context_size} chars) - Consider adding more required_context"
-    
+        return False, f"MINIMAL CONTEXT ({context_size} chars) - Very high hallucination risk"
+    elif context_size < 300 and not is_overview:
+        return True, f"LIMITED CONTEXT ({context_size} chars) - Some hallucination risk"
+
     return True, None
 
 
@@ -184,11 +216,16 @@ async def generate_single_section(
     logger: Optional[GenerationLogger] = None,
     section_idx: int = 0,
     total_sections: int = 0,
-    generated_sections: dict = None  # NEW: Previously generated sections
+    generated_sections: dict = None,
+    use_reasoner: bool = True  # Use DeepSeek Reasoner for better quality
 ) -> Tuple[str, str, Optional[str]]:
     """
     Generate a single documentation section.
-    
+
+    Args:
+        use_reasoner: If True, uses DeepSeek Reasoner model for complex reasoning.
+                      Recommended for final documentation generation.
+
     Returns:
         (section_id, content, warning)
     """
@@ -197,23 +234,26 @@ async def generate_single_section(
         section, analyzer, folder_docs, folder_tree, module_docs,
         generated_sections=generated_sections
     )
-    
+
     # Validate context sufficiency
     is_sufficient, warning = validate_context_sufficiency(section, context_data)
-    
+
     if warning:
         print(f"    ⚠️  {warning}")
-    
+
     # Generate prompt
     prompt = get_section_generation_prompt(
         section=section,
         context_data=context_data,
         plan_context=plan_context
     )
-    
-    # Call LLM with semaphore
+
+    # Call LLM with semaphore - use reasoner for complex generation
     async with semaphore:
-        content = await llm.generate_async(prompt)
+        if use_reasoner:
+            content = await llm.generate_with_reasoner_async(prompt)
+        else:
+            content = await llm.generate_async(prompt)
     
     # Log if logger provided
     if logger:
@@ -238,7 +278,8 @@ async def execute_documentation_plan(
     module_docs: dict,
     semaphore: asyncio.Semaphore,
     parallel: bool = True,
-    enable_logging: bool = True
+    enable_logging: bool = True,
+    use_reasoner: bool = True
 ) -> str:
     """
     Execute the documentation plan by generating each section.
@@ -252,6 +293,8 @@ async def execute_documentation_plan(
         semaphore: Rate limiting for LLM calls
         parallel: If True, generate sections in parallel where possible
         enable_logging: If True, log context and prompts to generation.txt
+        use_reasoner: If True, use DeepSeek Reasoner model for section generation.
+                      Recommended for better quality documentation.
 
     Returns:
         Complete documentation markdown
@@ -265,8 +308,9 @@ async def execute_documentation_plan(
         logger.start(plan)
     
     plan_context = f"Project type: {plan['project_type']}, Audience: {plan['target_audience']}"
-    
-    print(f"📝 Executing documentation plan ({len(plan['sections'])} sections)...")
+
+    model_name = "deepseek-reasoner" if use_reasoner else "deepseek-chat"
+    print(f"📝 Executing documentation plan ({len(plan['sections'])} sections) using {model_name}...")
     
     sections_dict = {}  # section_id -> content (also used as generated_sections)
     
@@ -298,7 +342,8 @@ async def execute_documentation_plan(
                         logger=logger,
                         section_idx=section_idx,
                         total_sections=len(plan['sections']),
-                        generated_sections=sections_dict.copy()  # Pass previous levels' content
+                        generated_sections=sections_dict.copy(),
+                        use_reasoner=use_reasoner
                     )
                     tasks.append(task)
                 
@@ -313,7 +358,7 @@ async def execute_documentation_plan(
             # Sequential mode - each section has access to ALL previous sections
             for idx, section in enumerate(plan['sections'], 1):
                 print(f"  [{idx}/{len(plan['sections'])}] Generating: {section['title']}")
-                
+
                 section_id, content, warning = await generate_single_section(
                     section=section,
                     analyzer=analyzer,
@@ -325,7 +370,8 @@ async def execute_documentation_plan(
                     logger=logger,
                     section_idx=idx,
                     total_sections=len(plan['sections']),
-                    generated_sections=sections_dict  # Pass all previous sections
+                    generated_sections=sections_dict,
+                    use_reasoner=use_reasoner
                 )
                 sections_dict[section_id] = content
         
@@ -357,115 +403,246 @@ def gather_section_context(
     folder_docs: dict,
     folder_tree: dict,
     module_docs: dict,
-    generated_sections: dict = None  # NEW: Previously generated sections
+    generated_sections: dict = None
 ) -> str:
     """
-    Gather only the context needed for this specific section.
+    Robust context gathering with explicit vocabulary and fallbacks.
 
-    This is KEY to avoiding hallucination - we don't dump everything.
-    Uses folder_tree to access hierarchical structure efficiently.
-    Supports: config files, source code, previous sections.
+    Supports prefixed context types for clarity:
+    - folder:{path}, module:{name}, source:{module}, api:{module}
+    - config:{filename}, configs, deps
+    - section:{id}, sections
+    - tree, all_folders, entry_points
+
+    Also handles legacy unprefixed requests with smart resolution.
     """
-
-    required = section['required_context']
+    required = section.get('required_context', [])
     context_parts = []
-    
-    # Initialize config reader for file access (lazy - only used if needed)
-    config_reader = None
-    
-    def get_config_reader():
-        nonlocal config_reader
-        if config_reader is None:
-            config_reader = ConfigFileReader(str(analyzer.root_folder))
-            config_reader.scan()
-        return config_reader
 
+    # Lazy-loaded config reader
+    _config_reader = None
+    def get_config_reader():
+        nonlocal _config_reader
+        if _config_reader is None:
+            _config_reader = ConfigFileReader(str(analyzer.root_folder))
+            _config_reader.scan()
+        return _config_reader
+
+    def read_source_file(module_name: str, max_chars: int = 8000) -> Optional[str]:
+        """Read source code for a module with multiple resolution strategies."""
+        # Strategy 1: Direct module index lookup
+        file_path = analyzer.module_index.get(module_name)
+        if file_path and file_path.exists():
+            try:
+                source = file_path.read_text(encoding='utf-8')
+                if len(source) > max_chars:
+                    source = source[:max_chars] + f"\n\n... [truncated at {max_chars} chars]"
+                return source
+            except:
+                pass
+
+        # Strategy 2: Try with dots replaced by path separators (partial match)
+        alt_name = module_name.replace('.', '/')
+        for name, path in analyzer.module_index.items():
+            if name.endswith(module_name) or name.endswith(module_name.replace('/', '.')) or alt_name in str(path):
+                try:
+                    source = path.read_text(encoding='utf-8')
+                    if len(source) > max_chars:
+                        source = source[:max_chars] + f"\n\n... [truncated]"
+                    return source
+                except:
+                    pass
+
+        # Strategy 3: Direct file path attempt
+        for suffix in ['', '.py']:
+            try:
+                direct_path = analyzer.root_folder / f"{module_name}{suffix}"
+                if direct_path.exists():
+                    source = direct_path.read_text(encoding='utf-8')
+                    if len(source) > max_chars:
+                        source = source[:max_chars] + f"\n\n... [truncated]"
+                    return source
+            except:
+                pass
+
+        # Strategy 4: Search by filename
+        target_file = module_name.split('.')[-1] + '.py'
+        for name, path in analyzer.module_index.items():
+            if path.name == target_file:
+                try:
+                    source = path.read_text(encoding='utf-8')
+                    if len(source) > max_chars:
+                        source = source[:max_chars] + f"\n\n... [truncated]"
+                    return source
+                except:
+                    pass
+
+        return None
+
+    def extract_public_api(module_name: str) -> Optional[str]:
+        """Extract public class and function signatures from a module."""
+        source = read_source_file(module_name, max_chars=50000)
+        if not source:
+            return None
+
+        try:
+            import ast
+            tree = ast.parse(source)
+            signatures = []
+
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.ClassDef) and not node.name.startswith('_'):
+                    # Get class with its public methods
+                    methods = []
+                    for item in node.body:
+                        if isinstance(item, ast.FunctionDef) and not item.name.startswith('_'):
+                            args = [a.arg for a in item.args.args if a.arg != 'self'][:4]
+                            args_str = ', '.join(args)
+                            if len(item.args.args) > len(args) + 1:
+                                args_str += ', ...'
+                            methods.append(f"{item.name}({args_str})")
+
+                    sig = f"class {node.name}:"
+                    if methods:
+                        sig += "\n    " + "\n    ".join(f"def {m}" for m in methods[:10])
+                    signatures.append(sig)
+
+                elif isinstance(node, ast.FunctionDef) and not node.name.startswith('_'):
+                    args = [a.arg for a in node.args.args][:5]
+                    args_str = ', '.join(args)
+                    if len(node.args.args) > 5:
+                        args_str += ', ...'
+                    signatures.append(f"def {node.name}({args_str})")
+
+            return "\n\n".join(signatures) if signatures else None
+        except:
+            return None
+
+    def get_entry_points() -> List[str]:
+        """Detect common entry point modules."""
+        entry_names = ['main', '__main__', 'app', 'cli', 'api', 'server', 'run', 'client', 'core']
+        found = []
+
+        # Check standard entry point names
+        for name in entry_names:
+            if name in analyzer.module_index:
+                found.append(name)
+
+        # Check for package's main __init__.py or primary module
+        root_modules = []
+        for name, path in analyzer.module_index.items():
+            # Find modules directly under root
+            try:
+                rel_path = path.relative_to(analyzer.root_folder)
+                if len(rel_path.parts) == 1:  # Direct child of root
+                    root_modules.append(name)
+            except:
+                pass
+
+        # Add primary package __init__ if it looks like main entry
+        for name in root_modules:
+            if name not in found and name not in ['__init__', 'setup', 'conftest']:
+                found.append(name)
+
+        return found[:4]  # Limit to 4 entry points
+
+    # Process each context requirement
     for ctx in required:
-        if ctx == "all_folders":
-            # Include all folder summaries in hierarchical order
+        if not ctx:
+            continue
+        ctx = ctx.strip()
+
+        # ═══════════════════════════════════════════════════════════════
+        # PREFIXED CONTEXT TYPES (explicit vocabulary)
+        # ═══════════════════════════════════════════════════════════════
+
+        if ctx.startswith("folder:"):
+            folder_path = ctx[7:]
+            if folder_path in folder_docs:
+                context_parts.append(f"## Folder: {folder_path}\n{folder_docs[folder_path]}\n")
+                # Include immediate children
+                if folder_path in folder_tree:
+                    for child in folder_tree[folder_path].get('children', [])[:5]:
+                        if child in folder_docs:
+                            context_parts.append(f"### Subfolder: {child}\n{folder_docs[child][:600]}\n")
+
+        elif ctx.startswith("module:"):
+            module_name = ctx[7:]
+            # Try exact match, then partial match
+            doc = module_docs.get(module_name)
+            if not doc:
+                for key in module_docs:
+                    if key.endswith(module_name) or module_name in key:
+                        doc = module_docs[key]
+                        module_name = key
+                        break
+            if doc:
+                context_parts.append(f"## Module: {module_name}\n{doc}\n")
+
+        elif ctx.startswith("source:"):
+            module_name = ctx[7:]
+            source = read_source_file(module_name)
+            if source:
+                context_parts.append(f"## Source Code: {module_name}\n```python\n{source}\n```\n")
+
+        elif ctx.startswith("api:"):
+            module_name = ctx[4:]
+            api = extract_public_api(module_name)
+            if api:
+                context_parts.append(f"## Public API: {module_name}\n```python\n{api}\n```\n")
+
+        elif ctx.startswith("config:"):
+            filename = ctx[7:]
+            reader = get_config_reader()
+            content = reader.get_file_content(filename)
+            if content:
+                if len(content) > 3000:
+                    content = content[:3000] + "\n... [truncated]"
+                context_parts.append(f"## Config: {filename}\n```\n{content}\n```\n")
+
+        elif ctx.startswith("section:"):
+            section_id = ctx[8:]
+            if generated_sections and section_id in generated_sections:
+                content = generated_sections[section_id]
+                preview = content[:2000] if len(content) > 2000 else content
+                context_parts.append(f"## Reference: {section_id}\n{preview}\n")
+
+        # ═══════════════════════════════════════════════════════════════
+        # KEYWORD CONTEXT TYPES
+        # ═══════════════════════════════════════════════════════════════
+
+        elif ctx == "tree" or ctx == "project_structure":
+            from layer1.grouper import FolderProcessor
+            processor = FolderProcessor(analyzer)
+            context_parts.append(f"## Project Structure\n{processor.get_folder_structure_str(include_modules=True)}\n")
+
+        elif ctx == "all_folders":
             for folder_path in sorted(folder_tree.keys(), key=lambda f: folder_tree[f]['depth']):
                 doc = folder_docs.get(folder_path, "")
-                depth_indent = "  " * folder_tree[folder_path]['depth']
-                context_parts.append(f"{depth_indent}## Folder: {folder_path}\n{doc}\n")
+                if doc:
+                    indent = "  " * folder_tree[folder_path]['depth']
+                    context_parts.append(f"{indent}## {folder_path}\n{doc[:1000]}\n")
 
         elif ctx == "top_level_folders":
-            # Only top-level folders
             for folder_path, info in folder_tree.items():
                 if info['depth'] == 0:
                     doc = folder_docs.get(folder_path, "")
                     context_parts.append(f"## Folder: {folder_path}\n{doc}\n")
 
-        elif ctx.endswith(".py"):
-            # Include specific Python module
-            # Fix: Strip .py extension for module lookup
-            module_name = ctx[:-3] if ctx.endswith(".py") else ctx
-            
-            # Also handle path-like names (layer1/parser.py -> layer1.parser)
-            if "/" in module_name:
-                module_name = module_name.replace("/", ".")
-            
-            # Try to find the module documentation
-            found = False
-            if module_name in module_docs:
-                context_parts.append(f"## Module: {ctx}\n{module_docs[module_name]}\n")
-                found = True
-            elif ctx in module_docs:
-                context_parts.append(f"## Module: {ctx}\n{module_docs[ctx]}\n")
-                found = True
-            
-            # Also include actual source code for the module
-            try:
-                file_path = analyzer.module_index.get(module_name)
-                if file_path and file_path.exists():
-                    source = file_path.read_text(encoding='utf-8')
-                    # Include source up to 8000 chars for key files
-                    max_source = 8000
-                    if len(source) > max_source:
-                        source = source[:max_source] + "\n\n... [source truncated]"
-                    context_parts.append(f"## Source Code: {ctx}\n```python\n{source}\n```\n")
-                    found = True
-            except Exception as e:
-                pass
-            
-            if not found:
-                # Try direct file read as fallback
-                try:
-                    direct_path = analyzer.root_folder / ctx
-                    if direct_path.exists():
-                        source = direct_path.read_text(encoding='utf-8')
-                        if len(source) > 8000:
-                            source = source[:8000] + "\n\n... [source truncated]"
-                        context_parts.append(f"## Source Code: {ctx}\n```python\n{source}\n```\n")
-                except:
-                    pass
-        
-        # Handle config file extensions
-        elif ctx.endswith(('.yml', '.yaml', '.md', '.json', '.txt', '.toml', '.ini', '.cfg', '.rst')):
+        elif ctx == "entry_points":
+            for ep in get_entry_points():
+                source = read_source_file(ep, max_chars=6000)
+                if source:
+                    context_parts.append(f"## Entry Point: {ep}\n```python\n{source}\n```\n")
+
+        elif ctx == "configs" or ctx == "config_files":
             reader = get_config_reader()
-            content = reader.get_file_content(ctx)
-            if content:
-                if len(content) > 3000:
-                    content = content[:3000] + "\n\n... [truncated]"
-                context_parts.append(f"## File: {ctx}\n```\n{content}\n```\n")
-            else:
-                # Try without path prefix
-                basename = ctx.split('/')[-1] if '/' in ctx else ctx
-                content = reader.get_file_content(basename)
-                if content:
-                    if len(content) > 3000:
-                        content = content[:3000] + "\n\n... [truncated]"
-                    context_parts.append(f"## File: {basename}\n```\n{content}\n```\n")
-        
-        # Include all config files summary
-        elif ctx == "config_files":
-            reader = get_config_reader()
-            for filename, path in reader.get_all_config_files().items():
+            for filename in list(reader.get_all_config_files().keys())[:8]:
                 content = reader.get_file_content(filename)
                 if content:
-                    preview = content[:800] if len(content) > 800 else content
-                    context_parts.append(f"## Config: {filename}\n```\n{preview}\n```\n")
-        
-        # Include only priority config files
+                    preview = content[:1200] if len(content) > 1200 else content
+                    context_parts.append(f"## {filename}\n```\n{preview}\n```\n")
+
         elif ctx == "priority_config":
             reader = get_config_reader()
             for filename, path in reader.get_priority_files().items():
@@ -474,65 +651,139 @@ def gather_section_context(
                     if len(content) > 2000:
                         content = content[:2000] + "\n\n... [truncated]"
                     context_parts.append(f"## {filename}\n```\n{content}\n```\n")
-        
-        # NEW: Include all previously generated sections
-        elif ctx == "previous_sections" and generated_sections:
-            for sid, content in generated_sections.items():
-                # Include up to 2000 chars of each previous section
-                preview = content[:2000] if len(content) > 2000 else content
-                context_parts.append(f"## Previous Section: {sid}\n{preview}\n")
-        
-        # NEW: Include a specific previous section by ID (e.g., "section:overview")
-        elif ctx.startswith("section:") and generated_sections:
-            ref_id = ctx.split(":", 1)[1]
-            if ref_id in generated_sections:
-                content = generated_sections[ref_id]
-                context_parts.append(f"## Reference: {ref_id}\n{content}\n")
-        
-        # NEW: Include source code directly (e.g., "source:main" or "source:layer1.parser")
-        elif ctx.startswith("source:"):
-            module_name = ctx.split(":", 1)[1]
-            try:
-                file_path = analyzer.module_index.get(module_name)
-                if file_path and file_path.exists():
-                    source = file_path.read_text(encoding='utf-8')
-                    if len(source) > 10000:
-                        source = source[:10000] + "\n\n... [source truncated]"
-                    context_parts.append(f"## Source: {module_name}\n```python\n{source}\n```\n")
-            except:
-                pass
 
-        elif "/" in ctx or "." in ctx:
-            # Include specific folder and optionally its children
+        elif ctx == "deps":
+            reader = get_config_reader()
+            dep_files = ['requirements.txt', 'pyproject.toml', 'setup.py', 'environment.yml', 'Pipfile', 'setup.cfg']
+            for filename in dep_files:
+                content = reader.get_file_content(filename)
+                if content:
+                    if len(content) > 2500:
+                        content = content[:2500] + "\n... [truncated]"
+                    context_parts.append(f"## {filename}\n```\n{content}\n```\n")
+
+        elif ctx == "sections" or ctx == "previous_sections":
+            if generated_sections:
+                for sid, content in generated_sections.items():
+                    preview = content[:1500] if len(content) > 1500 else content
+                    context_parts.append(f"## Previous: {sid}\n{preview}\n")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LEGACY/FALLBACK RESOLUTION (backwards compatibility)
+        # ═══════════════════════════════════════════════════════════════
+
+        elif ctx.endswith('.py'):
+            # Legacy: "layer1/parser.py" → try as source code
+            module_name = ctx[:-3].replace('/', '.')
+            source = read_source_file(module_name)
+            if source:
+                context_parts.append(f"## Source: {ctx}\n```python\n{source}\n```\n")
+            # Also try module docs
+            if module_name in module_docs:
+                context_parts.append(f"## Module Doc: {ctx}\n{module_docs[module_name]}\n")
+
+        elif ctx.endswith(('.yml', '.yaml', '.json', '.toml', '.ini', '.md', '.txt', '.cfg', '.rst')):
+            # Legacy: config file by extension
+            reader = get_config_reader()
+            content = reader.get_file_content(ctx)
+            if not content:
+                # Try basename only
+                basename = ctx.split('/')[-1] if '/' in ctx else ctx
+                content = reader.get_file_content(basename)
+            if content:
+                if len(content) > 3000:
+                    content = content[:3000] + "\n... [truncated]"
+                context_parts.append(f"## {ctx}\n```\n{content}\n```\n")
+
+        elif '/' in ctx or '.' in ctx:
+            # Legacy: could be folder path or module path
+            found_something = False
+
+            # Try as folder first
             if ctx in folder_docs:
                 context_parts.append(f"## Folder: {ctx}\n{folder_docs[ctx]}\n")
-
-                # Include children if they exist
                 if ctx in folder_tree:
-                    for child in folder_tree[ctx]['children']:
+                    for child in folder_tree[ctx].get('children', [])[:3]:
                         if child in folder_docs:
-                            context_parts.append(f"### Subfolder: {child}\n{folder_docs[child]}\n")
+                            context_parts.append(f"### {child}\n{folder_docs[child][:500]}\n")
+                found_something = True
 
-        else:
-            # Generic context type
-            if ctx == "project_structure":
-                from layer1.grouper import FolderProcessor
-                processor = FolderProcessor(analyzer)
-                context_parts.append(processor.get_folder_structure_str(include_modules=True))
-    
-    # NEW: Automatically include dependent sections' content
+            # Also try as module (source code)
+            module_name = ctx.replace('/', '.')
+            source = read_source_file(module_name)
+            if source:
+                context_parts.append(f"## Source: {ctx}\n```python\n{source}\n```\n")
+                found_something = True
+
+            # Try module docs
+            if module_name in module_docs and not found_something:
+                context_parts.append(f"## Module: {ctx}\n{module_docs[module_name]}\n")
+
+    # ═══════════════════════════════════════════════════════════════
+    # AUTO-INJECT: Dependencies from section dependencies field
+    # ═══════════════════════════════════════════════════════════════
+
     dependencies = section.get('dependencies', [])
     if dependencies and generated_sections:
-        dep_content_added = False
+        dep_parts = []
         for dep_id in dependencies:
             if dep_id in generated_sections:
-                if not dep_content_added:
-                    context_parts.append("\n--- PREVIOUSLY GENERATED (for context) ---\n")
-                    dep_content_added = True
-                dep_content = generated_sections[dep_id]
-                # Show first 1500 chars of dependent section
-                preview = dep_content[:1500] if len(dep_content) > 1500 else dep_content
-                context_parts.append(f"## From: {dep_id}\n{preview}\n")
+                content = generated_sections[dep_id]
+                preview = content[:1500] if len(content) > 1500 else content
+                dep_parts.append(f"## From: {dep_id}\n{preview}\n")
+        if dep_parts:
+            context_parts.append("\n--- DEPENDENT SECTIONS ---\n" + "\n".join(dep_parts))
 
-    return "\n".join(context_parts)
+    # ═══════════════════════════════════════════════════════════════
+    # AUTO-INJECT: Entry points for tutorial/quickstart (safety net)
+    # ═══════════════════════════════════════════════════════════════
+
+    section_style = section.get('style', '').lower()
+    section_id = section.get('section_id', '').lower()
+    section_title = section.get('title', '').lower()
+
+    is_tutorial = (
+        section_style in ['tutorial', 'quickstart'] or
+        'quickstart' in section_id or
+        'quick' in section_id or
+        'quick start' in section_title or
+        'getting started' in section_title
+    )
+
+    current_context = '\n'.join(context_parts)
+    has_source_code = '```python' in current_context
+
+    if is_tutorial and not has_source_code:
+        # No source code yet - auto-inject entry points as safety net
+        context_parts.append("\n--- AUTO-INCLUDED ENTRY POINTS (for code examples) ---\n")
+        for ep in get_entry_points()[:2]:
+            source = read_source_file(ep, max_chars=5000)
+            if source:
+                context_parts.append(f"## Entry Point: {ep}\n```python\n{source}\n```\n")
+
+    # Build final context with summary header
+    final_context = '\n'.join(context_parts)
+
+    # Add context summary at the top
+    has_source = '```python' in final_context
+    has_config = '```\n' in final_context and ('requirements' in final_context.lower() or 'environment' in final_context.lower())
+    has_folders = '## Folder' in final_context
+    has_api = '## Public API' in final_context
+
+    summary_parts = []
+    if has_source:
+        summary_parts.append("SOURCE CODE")
+    if has_api:
+        summary_parts.append("API SIGNATURES")
+    if has_config:
+        summary_parts.append("CONFIG FILES")
+    if has_folders:
+        summary_parts.append("FOLDER DOCS")
+
+    if summary_parts:
+        context_header = f"[Context includes: {', '.join(summary_parts)}]\n\n"
+    else:
+        context_header = "[Context includes: MINIMAL/NO SPECIFIC DATA]\n\n"
+
+    return context_header + final_context
 

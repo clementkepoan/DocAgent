@@ -119,16 +119,44 @@ Output JSON with this schema:
   ]
 }}
 
-REQUIRED_CONTEXT OPTIONS:
-- Folder paths: "layer1", "layer2/services" - loads folder documentation
-- Module paths: "layer1/parser.py" - loads specific module documentation  
-- Config files: "environment.yml", "requirements.txt", "README.md" - loads file content
-- Special keywords:
-  - "all_folders" - all folder summaries
-  - "top_level_folders" - only root-level folders
-  - "project_structure" - full project tree
-  - "priority_config" - all key config files (environment.yml, requirements.txt, etc.)
-  - "config_files" - all configuration files
+REQUIRED_CONTEXT VOCABULARY:
+═══════════════════════════════════════════════════════════════════
+
+STRUCTURAL CONTEXT (for architecture/overview sections):
+  • "folder:{{path}}"        - Folder documentation (e.g., "folder:src", "folder:src/utils")
+  • "module:{{name}}"        - Module documentation (e.g., "module:parser", "module:client")
+  • "tree"                   - Full project structure with all folders/files
+  • "all_folders"            - All folder summaries (use sparingly - large context)
+
+SOURCE CODE CONTEXT (for tutorials/API docs - CRITICAL for accurate examples):
+  • "source:{{module}}"      - Actual source code (e.g., "source:main", "source:app", "source:client")
+  • "api:{{module}}"         - Public class/function signatures only (e.g., "api:client", "api:core")
+  • "entry_points"           - Auto-detected entry points (main.py, app.py, __init__.py, cli.py)
+
+CONFIGURATION CONTEXT (for setup/installation sections):
+  • "config:{{filename}}"    - Specific file (e.g., "config:requirements.txt", "config:pyproject.toml")
+  • "configs"                - All detected config files (environment.yml, .env.example, etc.)
+  • "deps"                   - Dependency files only (requirements.txt, pyproject.toml, setup.py)
+
+CROSS-REFERENCE CONTEXT (for dependent sections):
+  • "section:{{id}}"         - Reference a previously generated section
+  • "sections"               - All previously generated sections
+
+LEGACY FORMATS (still supported):
+  • "layer1/parser.py"       - Resolves to source code (same as "source:layer1.parser")
+  • "environment.yml"        - Resolves to config file content
+  • "layer1"                 - Resolves to folder documentation
+
+SECTION-TYPE GUIDANCE:
+  • Overview/Architecture  → "tree", "all_folders"
+  • Installation/Setup     → "deps", "configs", "config:README.md"
+  • Quick Start/Tutorial   → "entry_points", "source:{{main_module}}", "api:{{main_module}}"
+  • API Reference          → "api:{{module1}}", "api:{{module2}}", "source:{{module}}"
+  • Configuration Guide    → "configs", "config:{{specific_file}}"
+
+CRITICAL: For Quick Start/Tutorial sections, you MUST include "entry_points" or specific
+"source:{{module}}" contexts. Folder summaries alone are NOT sufficient for code examples.
+Without actual source code, the LLM will hallucinate fake APIs.
 
 GUIDELINES:
 - Tailor sections to THIS codebase (don't use generic template)
@@ -152,21 +180,56 @@ def get_section_generation_prompt(
     plan_context: str
 ) -> str:
     """Generate prompt for creating a single documentation section"""
-    
-    # Check if context is empty or minimal
+
+    section_style = section.get('style', '').lower()
+    section_id = section.get('section_id', '').lower()
+    section_title = section.get('title', '').lower()
+
+    # Detect section type for specific rules
+    is_tutorial = (
+        section_style in ['tutorial', 'quickstart'] or
+        'quickstart' in section_id or
+        'quick start' in section_title or
+        'getting started' in section_title
+    )
+    is_api_docs = section_style == 'api-docs' or 'api' in section_id or 'reference' in section_title
+
+    # Check what's in the context
+    has_source_code = '```python' in (context_data or '')
+    context_size = len(context_data.strip()) if context_data else 0
+
+    # Build context-aware warnings
     context_warning = ""
-    if not context_data or len(context_data.strip()) < 50:
+
+    if context_size < 50:
         context_warning = """
-⚠️ WARNING: LIMITED CONTEXT AVAILABLE
-The context provided is minimal or empty. You MUST:
-- Only describe what can be inferred from the section purpose and project type
-- NOT invent specific features, commands, APIs, or code examples
-- Keep the section brief and factual
-- State clearly if specific details are not available
+⚠️ CRITICAL: NO SUBSTANTIAL CONTEXT PROVIDED
+You MUST:
+- Write only a brief, general description (2-3 sentences)
+- State "See the source code for details" for specifics
+- DO NOT generate any code examples, API signatures, or command examples
+"""
+    elif is_tutorial and not has_source_code:
+        context_warning = """
+⚠️ CRITICAL: TUTORIAL SECTION WITHOUT SOURCE CODE
+The context contains NO Python source code (no ```python blocks).
+You MUST:
+- Describe the general workflow in prose only
+- DO NOT generate any code examples or import statements
+- State "Refer to the source code for specific API usage"
+- Keep the section brief and conceptual
+"""
+    elif is_api_docs and not has_source_code:
+        context_warning = """
+⚠️ CRITICAL: API REFERENCE WITHOUT SOURCE CODE
+The context contains NO Python source code.
+You MUST:
+- List only the module/file names mentioned in context
+- DO NOT invent class names, method signatures, or function parameters
+- State "See source code for complete API documentation"
 """
 
-    return f"""
-You are generating a specific section of a project's documentation.
+    return f"""You are generating a specific section of a project's documentation.
 
 DOCUMENTATION PLAN CONTEXT:
 {plan_context}
@@ -177,15 +240,29 @@ SECTION TO GENERATE:
 - Style: {section['style']}
 - Max tokens: {section['max_tokens']}
 
-RELEVANT CONTEXT (filtered for this section only):
-{context_data if context_data else "[NO SPECIFIC CONTEXT PROVIDED]"}
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                              CONTEXT START                                    ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+{context_data if context_data else "[NO CONTEXT PROVIDED]"}
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                               CONTEXT END                                     ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 {context_warning}
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL ANTI-HALLUCINATION RULES (MUST FOLLOW):
 ═══════════════════════════════════════════════════════════════════════════════
 
-You MUST use ONLY factual information from the RELEVANT CONTEXT above.
+You MUST use ONLY factual information from between CONTEXT START and CONTEXT END above.
+Everything between those markers is retrieved context. Everything outside is instructions.
+
+CODE EXAMPLES RULE (STRICTLY ENFORCED):
+✗ If NO ```python blocks appear in the CONTEXT section → DO NOT write code examples
+✗ If you write `from X import Y` → X and Y MUST appear verbatim in the context
+✗ If you write `obj.method()` → that method MUST appear in the context
+✗ NEVER invent class names, function names, or method signatures
 
 DO NOT INVENT OR FABRICATE:
 ✗ CLI commands, flags, or arguments (like --help, --config, init, build, deploy)
@@ -200,18 +277,17 @@ IF CONTEXT IS MISSING OR INSUFFICIENT:
 - Say "See the source code for implementation details" rather than inventing details
 
 EXECUTE vs IMPORT RULE (FOR USAGE SECTIONS):
-- Determine if the codebase is an APPLICATION (runnable) or a LIBRARY (importable).
-- IF RUNNABLE (scripts, servers):
-    - Document how to RUN it (e.g., `python main.py`, `uvicorn app:app`).
-    - Do NOT invent a wrapper script (like run_agent.py) to import the main class.
-- IF LIBRARY:
-    - Document how to IMPORT it.
+- Check the CONTEXT for how the code is meant to be used
+- IF context shows a runnable script (if __name__ == "__main__"):
+    - Document how to RUN it (e.g., `python main.py`)
+- IF context shows importable classes/functions:
+    - Document how to IMPORT them using EXACT names from context
 
 WHAT YOU CAN DO:
-- Describe actual code, classes, functions shown in context
-- Quote or reference actual config file contents
-- Explain architecture based on actual folder/module structure
-- Provide accurate installation steps if environment.yml or requirements.txt is shown
+- Quote or paraphrase actual code, classes, functions shown in CONTEXT
+- Reference actual config file contents from CONTEXT
+- Explain architecture based on folder/module structure in CONTEXT
+- Provide installation steps ONLY if requirements.txt/environment.yml is in CONTEXT
 
 ═══════════════════════════════════════════════════════════════════════════════
 GROUNDING & TRACEABILITY:

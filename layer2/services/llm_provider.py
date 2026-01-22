@@ -35,6 +35,34 @@ class LLMProvider:
 
         return response.choices[0].message.content
 
+    async def generate_with_reasoner_async(self, prompt: str) -> str:
+        """
+        Asynchronous LLM call using DeepSeek Reasoner model.
+        Use this for complex tasks that benefit from chain-of-thought reasoning.
+
+        Note: Reasoner model returns both reasoning_content and content.
+        We return only the final content (answer), not the reasoning trace.
+        """
+        response = await self.async_client.chat.completions.create(
+            model="deepseek-reasoner",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        # DeepSeek Reasoner returns reasoning in reasoning_content and final answer in content
+        return response.choices[0].message.content
+
+    def generate_with_reasoner(self, prompt: str) -> str:
+        """
+        Synchronous LLM call using DeepSeek Reasoner model.
+        Use this for complex tasks that benefit from chain-of-thought reasoning.
+        """
+        response = self.sync_client.chat.completions.create(
+            model="deepseek-reasoner",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        return response.choices[0].message.content
+
     def generate_scc_overview(self, scc_modules: List[str], code_chunks_dict: Dict[str, str]) -> str:
         """
         Generate a high-level coherence overview for a strongly connected component (cycle).

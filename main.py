@@ -7,11 +7,11 @@ from layer3.async_doc_generator import AsyncDocGenerator
 async def main():
     """Entry point for documentation generation."""
     
-    generator = AsyncDocGenerator(root_path="./")
+    generator = AsyncDocGenerator(root_path="./", output_dir = "./output")
     final_docs = await generator.run()
     
     # Write all output files
-    generator.write_all_outputs(final_docs)
+    await generator.write_all_outputs(final_docs)
     
     # Print completion
     generator.reporter.print_completion()

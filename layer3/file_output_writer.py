@@ -164,13 +164,15 @@ class OutputWriter:
                     print(f"⚠️  Plan not perfect but proceeding: {feedback[:100]}...")
 
             # Step 3: Execute plan (generate sections)
+            # Use DeepSeek Reasoner model for higher quality generation
             condensed_doc = await execute_documentation_plan(
                 plan,
                 analyzer,
                 folder_docs,
                 folder_tree,
                 final_docs,
-                semaphore
+                semaphore,
+                use_reasoner=True  # Use deepseek-reasoner for final doc generation
             )
 
             # Write to file
