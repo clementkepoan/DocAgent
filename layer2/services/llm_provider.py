@@ -2,25 +2,33 @@ import os
 import asyncio
 from openai import AsyncOpenAI, OpenAI
 from dotenv import load_dotenv
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 import json
 
-
+if TYPE_CHECKING:
+    from config import LLMConfig
 
 load_dotenv()
 
 
 class LLMProvider:
-    def __init__(self):
-        self.api_key = os.environ.get("DEEPSEEK_KEY")
-        self.base_url = "https://api.deepseek.com"
-        self.async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)  # Reuse!
-        self.sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)        # Reuse!
+    def __init__(self, config: "LLMConfig" = None):
+        if config is None:
+            # Backward compatible: use defaults if no config provided
+            from config import LLMConfig
+            config = LLMConfig()
+
+        self.api_key = config.api_key
+        self.base_url = config.base_url
+        self.chat_model = config.chat_model
+        self.reasoner_model = config.reasoner_model
+        self.async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        self.sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def generate(self, prompt: str) -> str:
         """Synchronous LLM call"""
         response = self.sync_client.chat.completions.create(
-            model="deepseek-chat",
+            model=self.chat_model,
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -29,7 +37,7 @@ class LLMProvider:
     async def generate_async(self, prompt: str) -> str:
         """Asynchronous LLM call for parallel processing"""
         response = await self.async_client.chat.completions.create(
-            model="deepseek-chat",
+            model=self.chat_model,
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -44,7 +52,7 @@ class LLMProvider:
         We return only the final content (answer), not the reasoning trace.
         """
         response = await self.async_client.chat.completions.create(
-            model="deepseek-reasoner",
+            model=self.reasoner_model,
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -57,7 +65,7 @@ class LLMProvider:
         Use this for complex tasks that benefit from chain-of-thought reasoning.
         """
         response = self.sync_client.chat.completions.create(
-            model="deepseek-reasoner",
+            model=self.reasoner_model,
             messages=[{"role": "user", "content": prompt}]
         )
 

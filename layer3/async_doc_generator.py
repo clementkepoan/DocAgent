@@ -1,29 +1,51 @@
 """Simplified async documentation generator - main orchestration only."""
 
 import asyncio
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 from layer1.parser import ImportGraph
 from layer3.scc_manager import SCCManager
 from layer3.batch_processor import BatchProcessor
 from layer3.file_output_writer import OutputWriter
 from layer3.progress_reporter import ProgressReporter
 
-
-MAX_CONCURRENT_TASKS = 20
+if TYPE_CHECKING:
+    from config import DocGenConfig
 
 
 class AsyncDocGenerator:
     """Orchestrates async documentation generation - simplified coordinator."""
-    
-    def __init__(self, root_path: str = "./", output_dir: str = "./output"):
+
+    def __init__(self, root_path: str = "./", output_dir: str = "./output", config: "DocGenConfig" = None):
+        # Load config if not provided
+        if config is None:
+            from config import DocGenConfig
+            config = DocGenConfig.from_env()
+
+        # Override output_dir if explicitly passed (not default)
+        if output_dir != "./output":
+            from config import OutputConfig
+            config = DocGenConfig(
+                llm=config.llm,
+                processing=config.processing,
+                generation=config.generation,
+                output=OutputConfig(
+                    output_dir=output_dir,
+                    module_docs_file=config.output.module_docs_file,
+                    folder_docs_file=config.output.folder_docs_file,
+                    scc_contexts_file=config.output.scc_contexts_file,
+                    condensed_file=config.output.condensed_file,
+                )
+            )
+
+        self.config = config
         self.root_path = root_path
         self.analyzer = None
-        self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-        
-        # Delegate responsibilities to specialized components
-        self.scc_manager = SCCManager(root_path, self.semaphore)
-        self.batch_processor = BatchProcessor(root_path, None, self.semaphore)
-        self.output_writer = OutputWriter(output_dir)
+        self.semaphore = asyncio.Semaphore(config.processing.max_concurrent_tasks)
+
+        # Delegate responsibilities to specialized components (with config)
+        self.scc_manager = SCCManager(root_path, self.semaphore, config)
+        self.batch_processor = BatchProcessor(root_path, None, self.semaphore, config)
+        self.output_writer = OutputWriter(config)
         self.reporter = ProgressReporter()
     
     async def analyze_codebase(self) -> None:

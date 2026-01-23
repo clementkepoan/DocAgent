@@ -13,9 +13,22 @@ from layer1.config_reader import ConfigFileReader
 import asyncio
 import os
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 
-llm = LLMProvider()
+if TYPE_CHECKING:
+    from config import LLMConfig, DocGenConfig
+
+_default_llm = None
+
+
+def get_llm(config: "LLMConfig" = None) -> LLMProvider:
+    """Get LLM provider instance, optionally with custom config."""
+    global _default_llm
+    if config is not None:
+        return LLMProvider(config)
+    if _default_llm is None:
+        _default_llm = LLMProvider()
+    return _default_llm
 
 
 class GenerationLogger:
@@ -217,7 +230,8 @@ async def generate_single_section(
     section_idx: int = 0,
     total_sections: int = 0,
     generated_sections: dict = None,
-    use_reasoner: bool = True  # Use DeepSeek Reasoner for better quality
+    use_reasoner: bool = True,  # Use DeepSeek Reasoner for better quality
+    llm_config: "LLMConfig" = None
 ) -> Tuple[str, str, Optional[str]]:
     """
     Generate a single documentation section.
@@ -225,10 +239,13 @@ async def generate_single_section(
     Args:
         use_reasoner: If True, uses DeepSeek Reasoner model for complex reasoning.
                       Recommended for final documentation generation.
+        llm_config: Optional LLM configuration.
 
     Returns:
         (section_id, content, warning)
     """
+    llm = get_llm(llm_config)
+
     # Gather context (now includes generated_sections for dependency access)
     context_data = gather_section_context(
         section, analyzer, folder_docs, folder_tree, module_docs,
@@ -279,7 +296,8 @@ async def execute_documentation_plan(
     semaphore: asyncio.Semaphore,
     parallel: bool = True,
     enable_logging: bool = True,
-    use_reasoner: bool = True
+    use_reasoner: bool = None,
+    config: "DocGenConfig" = None
 ) -> str:
     """
     Execute the documentation plan by generating each section.
@@ -294,22 +312,33 @@ async def execute_documentation_plan(
         parallel: If True, generate sections in parallel where possible
         enable_logging: If True, log context and prompts to generation.txt
         use_reasoner: If True, use DeepSeek Reasoner model for section generation.
-                      Recommended for better quality documentation.
+                      If None, uses config.generation.use_reasoner or defaults to True.
+        config: Optional DocGenConfig for LLM settings.
 
     Returns:
         Complete documentation markdown
     """
+    # Resolve use_reasoner from config or default
+    if use_reasoner is None:
+        use_reasoner = config.generation.use_reasoner if config else True
+
+    llm_config = config.llm if config else None
+
     output_dir = os.path.join(str(analyzer.root_folder), "output")
-    
+
     # Initialize logger
     logger = None
     if enable_logging:
         logger = GenerationLogger(output_dir)
         logger.start(plan)
-    
+
     plan_context = f"Project type: {plan['project_type']}, Audience: {plan['target_audience']}"
 
-    model_name = "deepseek-reasoner" if use_reasoner else "deepseek-chat"
+    # Get model name for logging
+    if llm_config:
+        model_name = llm_config.reasoner_model if use_reasoner else llm_config.chat_model
+    else:
+        model_name = "deepseek-reasoner" if use_reasoner else "deepseek-chat"
     print(f"📝 Executing documentation plan ({len(plan['sections'])} sections) using {model_name}...")
     
     sections_dict = {}  # section_id -> content (also used as generated_sections)
@@ -343,7 +372,8 @@ async def execute_documentation_plan(
                         section_idx=section_idx,
                         total_sections=len(plan['sections']),
                         generated_sections=sections_dict.copy(),
-                        use_reasoner=use_reasoner
+                        use_reasoner=use_reasoner,
+                        llm_config=llm_config
                     )
                     tasks.append(task)
                 
@@ -371,7 +401,8 @@ async def execute_documentation_plan(
                     section_idx=idx,
                     total_sections=len(plan['sections']),
                     generated_sections=sections_dict,
-                    use_reasoner=use_reasoner
+                    use_reasoner=use_reasoner,
+                    llm_config=llm_config
                 )
                 sections_dict[section_id] = content
         

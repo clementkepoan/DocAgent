@@ -1,12 +1,26 @@
 """Folder-level documentation generation service."""
 
 from layer2.services.llm_provider import LLMProvider
+from typing import TYPE_CHECKING
 import asyncio
 
-llm = LLMProvider()
+if TYPE_CHECKING:
+    from config import LLMConfig
+
+_default_llm = None
 
 
-async def generate_folder_docs_async(analyzer, final_docs: dict, semaphore: asyncio.Semaphore) -> tuple:
+def get_llm(config: "LLMConfig" = None) -> LLMProvider:
+    """Get LLM provider instance, optionally with custom config."""
+    global _default_llm
+    if config is not None:
+        return LLMProvider(config)
+    if _default_llm is None:
+        _default_llm = LLMProvider()
+    return _default_llm
+
+
+async def generate_folder_docs_async(analyzer, final_docs: dict, semaphore: asyncio.Semaphore, llm_config: "LLMConfig" = None) -> tuple:
     """
     Generate folder-level documentation from module docs (async version).
 
@@ -22,6 +36,9 @@ async def generate_folder_docs_async(analyzer, final_docs: dict, semaphore: asyn
         (folder_docs, folder_tree) - docs dict and hierarchical tree structure
     """
     print("\n📁 Generating folder-level documentation (bottom-up, parallel per level)...\n")
+
+    # Get LLM instance
+    llm = get_llm(llm_config)
 
     # Import dependencies for dynamic prompt generation
     from layer2.prompts.folder_prompts import get_folder_documentation_prompt

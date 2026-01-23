@@ -2,15 +2,24 @@
 
 import os
 import asyncio
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 from layer2.services.folder_generator import generate_folder_docs_async
+
+if TYPE_CHECKING:
+    from config import DocGenConfig
 
 
 class OutputWriter:
     """Centralizes all file writing operations."""
-    
-    def __init__(self, output_dir: str = "./output"):
-        self.output_dir = os.path.abspath(output_dir)
+
+    def __init__(self, config: "DocGenConfig" = None):
+        # Load config if not provided
+        if config is None:
+            from config import DocGenConfig
+            config = DocGenConfig()
+
+        self.config = config
+        self.output_dir = os.path.abspath(config.output.output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
     
     def write_scc_contexts(self, scc_contexts_dict: Dict[str, str]) -> None:
@@ -74,8 +83,10 @@ class OutputWriter:
         """
         print("📁 Generating folder-level documentation...")
         try:
-            # Call async version with semaphore
-            folder_docs, folder_tree = await generate_folder_docs_async(analyzer, final_docs, semaphore)
+            # Call async version with semaphore and llm_config
+            folder_docs, folder_tree = await generate_folder_docs_async(
+                analyzer, final_docs, semaphore, llm_config=self.config.llm
+            )
 
             # Write to file (sync I/O is fine here)
             folder_txt_path = os.path.join(self.output_dir, "Folder Level docum.txt")
@@ -133,11 +144,11 @@ class OutputWriter:
                 semaphore
             )
 
-            # Step 2: Review plan with retry loop (up to 2 attempts)
-            MAX_PLAN_RETRIES = 2
+            # Step 2: Review plan with retry loop
+            max_plan_retries = self.config.processing.max_plan_retries
             plan_valid = False
 
-            for attempt in range(MAX_PLAN_RETRIES):
+            for attempt in range(max_plan_retries):
                 valid, feedback = await review_documentation_plan(
                     plan,
                     analyzer,
@@ -149,8 +160,8 @@ class OutputWriter:
                     plan_valid = True
                     break
 
-                if attempt < MAX_PLAN_RETRIES - 1:
-                    print(f"⚠️  Plan revision needed (attempt {attempt + 1}/{MAX_PLAN_RETRIES}): {feedback[:100]}...")
+                if attempt < max_plan_retries - 1:
+                    print(f"⚠️  Plan revision needed (attempt {attempt + 1}/{max_plan_retries}): {feedback[:100]}...")
                     # Regenerate plan with feedback
                     plan = await generate_documentation_plan(
                         analyzer,
@@ -164,7 +175,6 @@ class OutputWriter:
                     print(f"⚠️  Plan not perfect but proceeding: {feedback[:100]}...")
 
             # Step 3: Execute plan (generate sections)
-            # Use DeepSeek Reasoner model for higher quality generation
             condensed_doc = await execute_documentation_plan(
                 plan,
                 analyzer,
@@ -172,7 +182,8 @@ class OutputWriter:
                 folder_tree,
                 final_docs,
                 semaphore,
-                use_reasoner=True  # Use deepseek-reasoner for final doc generation
+                use_reasoner=self.config.generation.use_reasoner,
+                config=self.config
             )
 
             # Write to file

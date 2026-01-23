@@ -1,10 +1,24 @@
 from layer2.schemas.agent_state import AgentState
 from layer2.services.llm_provider import LLMProvider
 from layer2.prompts.module_prompts import get_module_documentation_prompt
+from typing import TYPE_CHECKING
 import json
 import re
 
-llm = LLMProvider()
+if TYPE_CHECKING:
+    from config import LLMConfig
+
+_default_llm = None
+
+
+def get_llm(config: "LLMConfig" = None) -> LLMProvider:
+    """Get LLM provider instance, optionally with custom config."""
+    global _default_llm
+    if config is not None:
+        return LLMProvider(config)
+    if _default_llm is None:
+        _default_llm = LLMProvider()
+    return _default_llm
 
 def parse_doc_json(text: str) -> dict:
     """Extracts JSON from LLM response"""
@@ -73,8 +87,10 @@ def format_scc_context(scc_data: dict) -> str:
 ---
 """
 
-async def module_write(state: AgentState) -> AgentState:
+async def module_write(state: AgentState, llm_config: "LLMConfig" = None) -> AgentState:
     """Generate documentation for a single module (async version)"""
+
+    llm = get_llm(llm_config)
 
     file = state["file"]
     code = state["code_chunks"]
@@ -123,17 +139,19 @@ async def module_write(state: AgentState) -> AgentState:
     return state
 
 
-async def scc_context_write(scc_modules: list, code_chunks_dict: dict) -> str:
+async def scc_context_write(scc_modules: list, code_chunks_dict: dict, llm_config: "LLMConfig" = None) -> str:
     """
     Generate high-level coherence documentation for a cycle (SCC).
 
     Args:
         scc_modules: List of module names in the cycle
         code_chunks_dict: Dict mapping module names to their source code
+        llm_config: Optional LLM configuration
 
     Returns:
         Formatted SCC context markdown
     """
+    llm = get_llm(llm_config)
     try:
         response = await llm.generate_scc_overview_async(scc_modules, code_chunks_dict)
         scc_data = parse_doc_json(response)

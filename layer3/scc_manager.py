@@ -1,16 +1,25 @@
 """SCC (Strongly Connected Component) context generation and management."""
 
 import asyncio
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, TYPE_CHECKING
 from layer2.schemas.agent_state import AgentState
 from layer2.services.code_retriever import retrieve
 from layer2.module_pipeline.writer import scc_context_write
 
+if TYPE_CHECKING:
+    from config import DocGenConfig
+
 
 class SCCManager:
     """Manages SCC context generation for cyclic dependencies."""
-    
-    def __init__(self, root_path: str, semaphore: asyncio.Semaphore):
+
+    def __init__(self, root_path: str, semaphore: asyncio.Semaphore, config: "DocGenConfig" = None):
+        # Load config if not provided
+        if config is None:
+            from config import DocGenConfig
+            config = DocGenConfig()
+
+        self.config = config
         self.root_path = root_path
         self.semaphore = semaphore
         self.scc_contexts_dict: Dict[str, str] = {}
@@ -19,10 +28,10 @@ class SCCManager:
         """Generate SCC context doc for cycles."""
         if len(scc) == 1:
             return None  # No context needed for independent modules
-        
+
         scc_list = sorted(scc)
         print(f"\n  📖 Generating SCC overview for {len(scc)} modules...")
-        
+
         # Retrieve code chunks for all modules in SCC
         code_chunks_dict = {}
         for module in scc_list:
@@ -41,13 +50,14 @@ class SCCManager:
             }
             state = retrieve(state)
             code_chunks_dict[module] = "\n".join(state["code_chunks"])
-        
+
         # Generate SCC overview with retry logic
-        max_retries = 3
+        max_retries = self.config.processing.scc_max_retries
+        llm_config = self.config.llm
         for attempt in range(max_retries):
             try:
                 async with self.semaphore:
-                    context = await scc_context_write(scc_list, code_chunks_dict)
+                    context = await scc_context_write(scc_list, code_chunks_dict, llm_config=llm_config)
                 print(f"  ✓ SCC overview generated")
                 return context
             except Exception as e:

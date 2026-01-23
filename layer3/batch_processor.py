@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, TYPE_CHECKING
 from tqdm import tqdm
 from layer2.schemas.agent_state import AgentState
 from layer2.services.code_retriever import retrieve
@@ -10,15 +10,20 @@ from layer2.module_pipeline.writer import module_write
 from layer2.module_pipeline.reviewer import review
 from layer3.progress_reporter import ProgressReporter
 
-
-MAX_RETRIES = 1
-RETRIEVE_TIMEOUT = 10  # seconds for file/AST retrieval
+if TYPE_CHECKING:
+    from config import DocGenConfig
 
 
 class BatchProcessor:
     """Handles batch processing of modules with parallel execution."""
-    
-    def __init__(self, root_path: str, analyzer, semaphore: asyncio.Semaphore):
+
+    def __init__(self, root_path: str, analyzer, semaphore: asyncio.Semaphore, config: "DocGenConfig" = None):
+        # Load config if not provided
+        if config is None:
+            from config import DocGenConfig
+            config = DocGenConfig()
+
+        self.config = config
         self.root_path = root_path
         self.analyzer = analyzer
         self.semaphore = semaphore
@@ -54,13 +59,19 @@ class BatchProcessor:
                 "dependencies": dependency_doc_sources if dependency_doc_sources else {dep: dep in self.final_docs for dep in dependencies}
             }
             
+            # Get config values
+            retrieve_timeout = self.config.processing.retrieve_timeout
+            max_retries = self.config.processing.max_retries
+            review_timeout = self.config.processing.review_timeout
+            llm_config = self.config.llm
+
             # Retrieve code chunks
             retrieve_start = time.time()
             try:
-                state = await asyncio.wait_for(asyncio.to_thread(retrieve, state), timeout=RETRIEVE_TIMEOUT)
+                state = await asyncio.wait_for(asyncio.to_thread(retrieve, state), timeout=retrieve_timeout)
                 state["last_retrieve_time"] = time.time() - retrieve_start
             except asyncio.TimeoutError:
-                return (module, None, False, f"Retrieve timed out after {RETRIEVE_TIMEOUT}s", {"retrieve": None, "write": None, "review": None})
+                return (module, None, False, f"Retrieve timed out after {retrieve_timeout}s", {"retrieve": None, "write": None, "review": None})
             except Exception as e:
                 return (module, None, False, f"Retrieve failed: {e}", {"retrieve": None, "write": None, "review": None})
 
@@ -68,31 +79,31 @@ class BatchProcessor:
             write_start = time.time()
             try:
                 async with self.semaphore:
-                    state = await module_write(state)
+                    state = await module_write(state, llm_config=llm_config)
                 state["last_write_time"] = time.time() - write_start
             except Exception as e:
                 return (module, None, False, f"Write failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": None, "review": None})
 
             # Review documentation
             try:
-                state = await review(state)
+                state = await review(state, llm_config=llm_config, timeout=review_timeout)
             except Exception as e:
                 return (module, None, False, f"Review failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": state.get("last_write_time"), "review": None})
 
             # Retry if needed
             retry_count = 0
-            while not state["review_passed"] and retry_count < MAX_RETRIES:
+            while not state["review_passed"] and retry_count < max_retries:
                 retry_count += 1
                 state["retry_count"] = retry_count
                 write_start = time.time()
                 try:
                     async with self.semaphore:
-                        state = await module_write(state)
+                        state = await module_write(state, llm_config=llm_config)
                     state["last_write_time"] = time.time() - write_start
                 except Exception as e:
                     return (module, None, False, f"Write retry failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": None, "review": None})
                 try:
-                    state = await review(state)
+                    state = await review(state, llm_config=llm_config, timeout=review_timeout)
                 except Exception as e:
                     return (module, None, False, f"Review retry failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": state.get("last_write_time"), "review": None})
 
