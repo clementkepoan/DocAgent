@@ -22,6 +22,7 @@ class LLMProvider:
         self.base_url = config.base_url
         self.chat_model = config.chat_model
         self.reasoner_model = config.reasoner_model
+        self.temperature = config.temperature
         self.async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
         self.sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
@@ -29,7 +30,8 @@ class LLMProvider:
         """Synchronous LLM call"""
         response = self.sync_client.chat.completions.create(
             model=self.chat_model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature
         )
 
         return response.choices[0].message.content
@@ -38,7 +40,8 @@ class LLMProvider:
         """Asynchronous LLM call for parallel processing"""
         response = await self.async_client.chat.completions.create(
             model=self.chat_model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature
         )
 
         return response.choices[0].message.content
@@ -53,7 +56,8 @@ class LLMProvider:
         """
         response = await self.async_client.chat.completions.create(
             model=self.reasoner_model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature
         )
 
         # DeepSeek Reasoner returns reasoning in reasoning_content and final answer in content
@@ -66,7 +70,8 @@ class LLMProvider:
         """
         response = self.sync_client.chat.completions.create(
             model=self.reasoner_model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature
         )
 
         return response.choices[0].message.content

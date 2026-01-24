@@ -12,6 +12,7 @@ class LLMConfig:
     base_url: str = "https://api.deepseek.com"
     chat_model: str = "deepseek-chat"
     reasoner_model: str = "deepseek-reasoner"
+    temperature: float = 0.7
 
     def __post_init__(self):
         if self.api_key is None:
@@ -63,6 +64,7 @@ class DocGenConfig:
                 base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
                 chat_model=os.environ.get("DEEPSEEK_CHAT_MODEL", "deepseek-chat"),
                 reasoner_model=os.environ.get("DEEPSEEK_REASONER_MODEL", "deepseek-reasoner"),
+                temperature=float(os.environ.get("LLM_TEMPERATURE", "0.7")),
             ),
             processing=ProcessingConfig(
                 max_concurrent_tasks=int(os.environ.get("MAX_CONCURRENT_TASKS", "20")),

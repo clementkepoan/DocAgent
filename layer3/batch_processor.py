@@ -84,15 +84,16 @@ class BatchProcessor:
             except Exception as e:
                 return (module, None, False, f"Write failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": None, "review": None})
 
-            # Review documentation
-            try:
-                state = await review(state, llm_config=llm_config, timeout=review_timeout)
-            except Exception as e:
-                return (module, None, False, f"Review failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": state.get("last_write_time"), "review": None})
+            # Review documentation (skip if max_retries is 0)
+            if max_retries > 0:
+                try:
+                    state = await review(state, llm_config=llm_config, timeout=review_timeout)
+                except Exception as e:
+                    return (module, None, False, f"Review failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": state.get("last_write_time"), "review": None})
 
             # Retry if needed
             retry_count = 0
-            while not state["review_passed"] and retry_count < max_retries:
+            while max_retries > 0 and not state["review_passed"] and retry_count < max_retries:
                 retry_count += 1
                 state["retry_count"] = retry_count
                 write_start = time.time()
