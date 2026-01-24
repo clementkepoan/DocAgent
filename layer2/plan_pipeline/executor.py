@@ -98,6 +98,7 @@ class GenerationLogger:
         """Write to log file."""
         if self._file:
             self._file.write(text + "\n")
+            self._file.flush()  # Ensure content is written immediately
 
 
 def validate_context_sufficiency(section: dict, context_data: str) -> Tuple[bool, str]:
@@ -324,7 +325,11 @@ async def execute_documentation_plan(
 
     llm_config = config.llm if config else None
 
-    output_dir = os.path.join(str(analyzer.root_folder), "output")
+    # Use configured output directory
+    if config and config.output:
+        output_dir = config.output.output_dir
+    else:
+        output_dir = os.path.join(str(analyzer.root_folder), "output")
 
     # Initialize logger
     logger = None
