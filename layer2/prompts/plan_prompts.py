@@ -13,14 +13,27 @@ def get_documentation_plan_prompt(
     main_py_preview: str = None,
     has_tests: bool = False,
     config_files: str = None,
-    reviewer_feedback: str = None
+    reviewer_feedback: str = None,
+    nested_structure: str = None,
+    important_subfolders: str = None
 ) -> str:
     """Generate prompt for documentation planning agent"""
 
+    # Show more folders with longer summaries for better coverage
     folder_summary = "\n".join([
-        f"- {folder}: {doc[:150]}..."
-        for folder, doc in list(folder_docs.items())[:10]
+        f"- {folder}: {doc[:300]}..."
+        for folder, doc in list(folder_docs.items())[:25]
     ])
+
+    # Add nested folder structure if provided
+    nested_section = ""
+    if nested_structure:
+        nested_section = f"\n\nNESTED FOLDER STRUCTURE (showing subfolders):\n{nested_structure}\n"
+
+    # Add important subfolders section if provided
+    important_subfolders_section = ""
+    if important_subfolders:
+        important_subfolders_section = f"\n\nIMPORTANT SUBFOLDERS (folders with many modules):\n{important_subfolders}\n"
 
     feedback_section = f"\n\nREVIEWER FEEDBACK (from previous attempt):\n{reviewer_feedback}\n\nPlease address the feedback above in your revised plan.\n" if reviewer_feedback else ""
     
@@ -49,7 +62,7 @@ CODEBASE ANALYSIS
 
 FOLDER STRUCTURE:
 {folder_structure}
-
+{nested_section}{important_subfolders_section}
 FOLDER SUMMARIES (sample):
 {folder_summary}
 {config_section}{main_py_section}
@@ -130,7 +143,9 @@ STRUCTURAL CONTEXT (for architecture/overview sections):
 
 SOURCE CODE CONTEXT (for tutorials/API docs - CRITICAL for accurate examples):
   • "source:{{module}}"      - Actual source code (e.g., "source:main", "source:app", "source:client")
-  • "api:{{module}}"         - Public class/function signatures only (e.g., "api:client", "api:core")
+  • "api:{{module}}"         - Public class/function signatures + __all__ exports + submodule list
+  • "exports:{{module}}"     - Just __all__ exports from a module's __init__.py (lightweight)
+  • "submodules:{{folder}}"  - List all .py files in a folder (e.g., "submodules:browser/watchdogs")
   • "entry_points"           - Auto-detected entry points (main.py, app.py, __init__.py, cli.py)
 
 CONFIGURATION CONTEXT (for setup/installation sections):
@@ -148,11 +163,12 @@ LEGACY FORMATS (still supported):
   • "layer1"                 - Resolves to folder documentation
 
 SECTION-TYPE GUIDANCE:
-  • Overview/Architecture  → "tree", "all_folders"
-  • Installation/Setup     → "deps", "configs", "config:README.md"
-  • Quick Start/Tutorial   → "entry_points", "source:{{main_module}}", "api:{{main_module}}"
-  • API Reference          → "api:{{module1}}", "api:{{module2}}", "source:{{module}}"
-  • Configuration Guide    → "configs", "config:{{specific_file}}"
+  • Overview/Architecture  → "tree", "all_folders" (max_tokens: 800-1200)
+  • Installation/Setup     → "deps", "configs", "config:README.md" (max_tokens: 400-600)
+  • Quick Start/Tutorial   → "entry_points", "source:{{main_module}}", "api:{{main_module}}" (max_tokens: 600-1000)
+  • API Reference          → "api:{{module1}}", "exports:{{module}}", "submodules:{{folder}}" (max_tokens: 1000-1500)
+  • Configuration Guide    → "configs", "config:{{specific_file}}" (max_tokens: 500-800)
+  • Architecture Deep Dive → "tree", "all_folders", "submodules:{{key_folders}}" (max_tokens: 1200-2000)
 
 CRITICAL: For Quick Start/Tutorial sections, you MUST include "entry_points" or specific
 "source:{{module}}" contexts. Folder summaries alone are NOT sufficient for code examples.
@@ -169,6 +185,12 @@ GUIDELINES:
 - Order: overview → setup → usage → architecture → contributing
 - NEVER include "Testing Strategy" section unless has_tests=True AND tests/ directory exists
 - NEVER include "Quality Assurance" section based on inference from single files
+
+IMPORTANT SUBFOLDERS:
+- If IMPORTANT SUBFOLDERS are listed above, use "submodules:{{folder}}" to document them comprehensively
+- For folders with 5+ modules (e.g., watchdogs/, providers/, handlers/), include them in Architecture or API sections
+- Example: If "browser/watchdogs/ (12 modules)" is shown, add "submodules:browser/watchdogs" to the API Reference
+- This ensures ALL components are discovered and documented, not just the ones with documentation
 
 Generate the plan now.
 """

@@ -91,6 +91,12 @@ async def generate_documentation_plan(
     config_reader.scan()
     config_files_summary = config_reader.get_summary()
 
+    # Generate nested folder structure (showing subfolders with their contents)
+    nested_structure = _generate_nested_structure(analyzer)
+
+    # Auto-detect important subfolders (folders with many .py files)
+    important_subfolders = _detect_important_subfolders(analyzer)
+
     # Build prompt
     prompt = get_documentation_plan_prompt(
         folder_structure=folder_structure,
@@ -104,7 +110,9 @@ async def generate_documentation_plan(
         main_py_preview=main_py_preview,
         has_tests=any("test" in str(p) for p in analyzer.module_index.values()),
         config_files=config_files_summary,
-        reviewer_feedback=reviewer_feedback
+        reviewer_feedback=reviewer_feedback,
+        nested_structure=nested_structure,
+        important_subfolders=important_subfolders
     )
 
     print("📋 Generating documentation structure plan...")
@@ -135,29 +143,113 @@ def generate_default_plan() -> DocumentationPlan:
                 "section_id": "overview",
                 "title": "Overview",
                 "purpose": "High-level project description",
-                "required_context": [],
+                "required_context": ["tree"],
                 "style": "introduction",
-                "max_tokens": 500,
+                "max_tokens": 800,
                 "dependencies": []
             },
             {
                 "section_id": "installation",
                 "title": "Installation",
                 "purpose": "Setup instructions",
-                "required_context": [],
+                "required_context": ["deps", "configs"],
                 "style": "tutorial",
-                "max_tokens": 300,
+                "max_tokens": 500,
                 "dependencies": []
             },
             {
                 "section_id": "architecture",
                 "title": "Architecture",
                 "purpose": "System design overview",
-                "required_context": ["all_folders"],
+                "required_context": ["all_folders", "tree"],
                 "style": "architecture",
-                "max_tokens": 1000,
+                "max_tokens": 1500,
                 "dependencies": ["overview"]
+            },
+            {
+                "section_id": "api-reference",
+                "title": "API Reference",
+                "purpose": "Public API documentation",
+                "required_context": ["entry_points"],
+                "style": "api-docs",
+                "max_tokens": 1200,
+                "dependencies": ["architecture"]
             }
         ],
         "glossary": []
     }
+
+
+def _generate_nested_structure(analyzer) -> str:
+    """
+    Generate a nested folder structure showing subfolders and their .py files.
+    This helps the planner see components like watchdogs, LLM providers, etc.
+    """
+    from pathlib import Path
+    from collections import defaultdict
+
+    # Group modules by their parent folders
+    folder_contents = defaultdict(list)
+
+    for module_name, file_path in analyzer.module_index.items():
+        try:
+            rel_path = file_path.relative_to(analyzer.root_folder)
+            parent = str(rel_path.parent) if rel_path.parent != Path('.') else '.'
+            folder_contents[parent].append(file_path.stem)
+        except:
+            pass
+
+    # Build nested structure string
+    lines = []
+    sorted_folders = sorted(folder_contents.keys(), key=lambda x: (x.count('/'), x))
+
+    for folder in sorted_folders[:40]:  # Limit to 40 folders
+        depth = folder.count('/') if folder != '.' else 0
+        indent = "  " * depth
+        folder_display = folder if folder != '.' else '(root)'
+
+        modules = folder_contents[folder]
+        if len(modules) > 0:
+            lines.append(f"{indent}📁 {folder_display}/ ({len(modules)} modules)")
+            # Show first 8 modules in the folder
+            for mod in sorted(modules)[:8]:
+                lines.append(f"{indent}  • {mod}")
+            if len(modules) > 8:
+                lines.append(f"{indent}  ... and {len(modules) - 8} more")
+
+    return "\n".join(lines) if lines else None
+
+
+def _detect_important_subfolders(analyzer) -> str:
+    """
+    Auto-detect subfolders with many .py files that likely contain important components.
+    Examples: watchdogs/, providers/, handlers/, models/, etc.
+    """
+    from pathlib import Path
+    from collections import defaultdict
+
+    # Count .py files per folder
+    folder_counts = defaultdict(int)
+    folder_modules = defaultdict(list)
+
+    for module_name, file_path in analyzer.module_index.items():
+        try:
+            rel_path = file_path.relative_to(analyzer.root_folder)
+            parent = str(rel_path.parent) if rel_path.parent != Path('.') else '.'
+            folder_counts[parent] += 1
+            folder_modules[parent].append(file_path.stem)
+        except:
+            pass
+
+    # Find folders with 4+ modules (likely important component collections)
+    important = []
+    for folder, count in sorted(folder_counts.items(), key=lambda x: -x[1]):
+        if count >= 4 and folder != '.':
+            modules = folder_modules[folder]
+            # Show folder with its module names
+            module_list = ', '.join(sorted(modules)[:10])
+            if len(modules) > 10:
+                module_list += f", ... ({len(modules)} total)"
+            important.append(f"• {folder}/ ({count} modules): {module_list}")
+
+    return "\n".join(important[:15]) if important else None

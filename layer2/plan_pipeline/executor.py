@@ -515,6 +515,63 @@ def gather_section_context(
 
         return None
 
+    def extract_package_exports(folder_path: str) -> Optional[str]:
+        """Extract __all__ exports and submodules from a package's __init__.py."""
+        from pathlib import Path
+        import ast
+
+        # Try to find __init__.py in the folder
+        init_paths = [
+            analyzer.root_folder / folder_path / "__init__.py",
+            analyzer.root_folder / folder_path.replace('.', '/') / "__init__.py",
+        ]
+
+        init_content = None
+        for init_path in init_paths:
+            if init_path.exists():
+                try:
+                    init_content = init_path.read_text(encoding='utf-8')
+                    break
+                except:
+                    pass
+
+        if not init_content:
+            return None
+
+        result_parts = []
+
+        try:
+            tree = ast.parse(init_content)
+
+            # Find __all__ definition
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == '__all__':
+                            if isinstance(node.value, ast.List):
+                                exports = [elt.s if hasattr(elt, 's') else str(elt.value)
+                                          for elt in node.value.elts
+                                          if isinstance(elt, (ast.Str, ast.Constant))]
+                                if exports:
+                                    result_parts.append(f"__all__ exports: {', '.join(exports)}")
+
+            # List submodules (subdirectories with __init__.py or .py files)
+            folder_full = analyzer.root_folder / folder_path.replace('.', '/')
+            if folder_full.exists():
+                submodules = []
+                for item in sorted(folder_full.iterdir()):
+                    if item.is_dir() and (item / "__init__.py").exists():
+                        submodules.append(f"  📁 {item.name}/")
+                    elif item.is_file() and item.suffix == '.py' and item.name != '__init__.py':
+                        submodules.append(f"  📄 {item.stem}")
+                if submodules:
+                    result_parts.append(f"Submodules:\n" + "\n".join(submodules[:30]))
+
+        except:
+            pass
+
+        return "\n".join(result_parts) if result_parts else None
+
     def extract_public_api(module_name: str) -> Optional[str]:
         """Extract public class and function signatures from a module."""
         source = read_source_file(module_name, max_chars=50000)
@@ -623,9 +680,21 @@ def gather_section_context(
 
         elif ctx.startswith("api:"):
             module_name = ctx[4:]
+            # First try to get package-level exports and submodules
+            pkg_exports = extract_package_exports(module_name)
+            if pkg_exports:
+                context_parts.append(f"## Package: {module_name}\n{pkg_exports}\n")
+            # Then get API signatures
             api = extract_public_api(module_name)
             if api:
                 context_parts.append(f"## Public API: {module_name}\n```python\n{api}\n```\n")
+
+        elif ctx.startswith("exports:"):
+            # Lightweight: just __all__ exports from __init__.py
+            module_name = ctx[8:]
+            pkg_exports = extract_package_exports(module_name)
+            if pkg_exports:
+                context_parts.append(f"## Exports: {module_name}\n{pkg_exports}\n")
 
         elif ctx.startswith("config:"):
             filename = ctx[7:]
@@ -642,6 +711,27 @@ def gather_section_context(
                 content = generated_sections[section_id]
                 preview = content[:2000] if len(content) > 2000 else content
                 context_parts.append(f"## Reference: {section_id}\n{preview}\n")
+
+        elif ctx.startswith("submodules:"):
+            # List all .py files in a folder (useful for discovering components like watchdogs)
+            folder_path = ctx[11:]
+            from pathlib import Path
+            folder_full = analyzer.root_folder / folder_path.replace('.', '/')
+            if folder_full.exists() and folder_full.is_dir():
+                files = []
+                for item in sorted(folder_full.iterdir()):
+                    if item.is_dir() and (item / "__init__.py").exists():
+                        files.append(f"  📁 {item.name}/ (package)")
+                    elif item.is_file() and item.suffix == '.py' and item.name != '__init__.py':
+                        # Get first docstring or class/function name
+                        try:
+                            content = item.read_text(encoding='utf-8')[:500]
+                            first_line = content.split('\n')[0][:60]
+                            files.append(f"  📄 {item.stem}: {first_line}")
+                        except:
+                            files.append(f"  📄 {item.stem}")
+                if files:
+                    context_parts.append(f"## Submodules in {folder_path}\n" + "\n".join(files[:40]) + "\n")
 
         # ═══════════════════════════════════════════════════════════════
         # KEYWORD CONTEXT TYPES
