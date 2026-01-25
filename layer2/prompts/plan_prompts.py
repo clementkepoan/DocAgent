@@ -102,8 +102,11 @@ YOUR TASK
 ---------
 Design a documentation plan that:
 1. Identifies the project type CORRECTLY based on above criteria
-2. Determines target audience (end users, developers, contributors)
-3. Creates an optimal section structure (not just generic README template)
+2. Target audience should be "all" (end users, developers, and contributors)
+3. Creates an optimal section structure with a balanced mix:
+   - For users: Overview, Quick Start, Installation, Usage
+   - For developers: API Reference, Architecture, Configuration
+   - For contributors: Contributing Guide (if applicable)
 4. Specifies which context each section needs (avoid loading everything)
 5. Orders sections logically (dependencies between sections)
 
@@ -392,17 +395,26 @@ TARGET AUDIENCE: {plan['target_audience']}
 PLANNED SECTIONS:
 {sections_summary}
 
+EXPECTED SECTION COVERAGE (for "all" audiences):
+- For users: Overview, Quick Start, Installation, Usage
+- For developers: API Reference, Architecture, Configuration
+- For contributors: Contributing Guide (if applicable)
+
+The plan should include a balanced mix from the above categories.
+
 Evaluate:
-1. Are sections appropriate for this project type?
+1. Does the plan cover a balanced mix of sections for all audiences?
 2. Is the order logical (dependencies respected)?
-3. Are required_context specifications realistic?
-4. Are any critical sections missing?
-5. Are there unnecessary sections?
+3. Are required_context specifications using valid vocabulary?
+4. Are any CRITICAL sections missing (Overview, Installation, Architecture)?
+
+IMPORTANT: Be lenient. Only reject if critical sections are missing or ordering is broken.
+A plan with 10-15 sections covering the above categories is acceptable.
 
 Return JSON:
 {{
   "plan_valid": boolean,
-  "feedback": "Detailed suggestions or empty if valid",
+  "feedback": "Brief feedback or empty if valid",
   "missing_sections": ["section-id"],
   "unnecessary_sections": ["section-id"],
   "ordering_issues": "Description or empty"

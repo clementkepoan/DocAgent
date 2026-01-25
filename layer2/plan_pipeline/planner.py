@@ -117,9 +117,9 @@ async def generate_documentation_plan(
 
     print("📋 Generating documentation structure plan...")
 
-    # Use semaphore to respect rate limits
+    # Use semaphore to respect rate limits - use reasoner for better planning
     async with semaphore:
-        response = await llm.generate_async(prompt)
+        response = await llm.generate_with_reasoner_async(prompt)
 
     try:
         plan_data = parse_plan_json(response)
