@@ -11,7 +11,6 @@ dependencies:
   - numpy
   - scipy
   - scikit-learn
-  - chromadb
   - pyyaml
   - tqdm
   - rich
@@ -23,12 +22,23 @@ dependencies:
       - langchain-openai
       - langgraph
 
-      # Tree-sitter (WORKS on osx-arm64 via pip)
+      # Tree-sitter (explicit python grammar)
       - tree-sitter
       - tree-sitter-languages
+      - tree-sitter-python
 
-      # Embeddings
-      - sentence-transformers
+
+      # Embeddings & reranking
+      - sentence-transformers  # for MiniLM-L6 cross-encoder
+      - rank_bm25
+      - fastembed  # optional: CPU fallback if needed
+
+      # Qdrant & API
+      - qdrant-client
+      - fastapi
+      - uvicorn[standard]
+      - celery
+      - redis
 
       # OpenAI
       - openai
@@ -36,11 +46,17 @@ dependencies:
 
       # Utilities
       - watchdog
+      - typer
+      - httpx
+      - docker
+      - inflection
 
       # Parser visualization
       - networkx
       - matplotlib
 
+      # Development
       - python-dotenv
-
+      - pytest
+      - ruff
 

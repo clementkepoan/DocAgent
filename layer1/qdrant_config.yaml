@@ -1,0 +1,3 @@
+# Create this file: qdrant_config.yaml
+service:
+  api_key: null  # Explicitly disable
