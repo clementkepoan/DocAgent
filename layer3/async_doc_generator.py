@@ -1,15 +1,18 @@
 """Simplified async documentation generator - main orchestration only."""
 
 import asyncio
-from typing import Dict, TYPE_CHECKING
+from pathlib import Path
+from typing import Dict, Optional, TYPE_CHECKING
 from layer1.parser import ImportGraph
 from layer3.scc_manager import SCCManager
 from layer3.batch_processor import BatchProcessor
 from layer3.file_output_writer import OutputWriter
 from layer3.progress_reporter import ProgressReporter
+from layer3.rag_usage_tracker import RAGUsageTracker
 
 if TYPE_CHECKING:
     from config import DocGenConfig
+    from layer2.services.rag_retriever import RAGService
 
 
 class AsyncDocGenerator:
@@ -42,12 +45,51 @@ class AsyncDocGenerator:
         self.analyzer = None
         self.semaphore = asyncio.Semaphore(config.processing.max_concurrent_tasks)
 
+        # RAG service (lazy initialized)
+        self._rag_service: Optional["RAGService"] = None
+
+        # RAG usage tracker (only if RAG is enabled)
+        self._rag_tracker: Optional[RAGUsageTracker] = None
+
         # Delegate responsibilities to specialized components (with config)
         self.scc_manager = SCCManager(root_path, self.semaphore, config)
         self.batch_processor = BatchProcessor(root_path, None, self.semaphore, config)
         self.output_writer = OutputWriter(config)
         self.reporter = ProgressReporter()
-    
+
+    @property
+    def rag_service(self) -> Optional["RAGService"]:
+        """Lazy initialization of RAG service."""
+        if self._rag_service is None and (self.config.generation.enable_rag or self.config.generation.enable_adaptive_rag):
+            from layer2.services.rag_retriever import RAGService
+            self._rag_service = RAGService(self.config)
+        return self._rag_service
+
+    @property
+    def rag_tracker(self) -> Optional[RAGUsageTracker]:
+        """Lazy initialization of RAG usage tracker."""
+        if self._rag_tracker is None and (self.config.generation.enable_rag or self.config.generation.enable_adaptive_rag):
+            self._rag_tracker = RAGUsageTracker(self.config.output.output_dir)
+        return self._rag_tracker
+
+    async def index_for_rag(self) -> None:
+        """Index codebase for RAG retrieval (if enabled)."""
+        if not (self.config.generation.enable_rag or self.config.generation.enable_adaptive_rag):
+            return
+
+        print("🔍 Indexing codebase for RAG retrieval...")
+        try:
+            stats = await asyncio.to_thread(
+                self.rag_service.index_codebase,
+                Path(self.root_path),
+                reindex=self.config.generation.rag_reindex
+            )
+            print(f"   ✓ Indexed {stats['files_processed']} files, {stats['chunks_created']} chunks")
+        except Exception as e:
+            print(f"   ⚠️ RAG indexing failed: {e}")
+            print("   Continuing without RAG context...")
+            self._rag_service = None  # Disable RAG for this run
+
     async def analyze_codebase(self) -> None:
         """Analyze codebase structure and detect cycles."""
         print("📊 Analyzing codebase structure...")
@@ -65,12 +107,22 @@ class AsyncDocGenerator:
     
     async def run(self) -> Dict[str, str]:
         """Main orchestration: batch processing by dependency layers."""
-        
+
         self.reporter.start()
         self.reporter.print_header()
-        
+
+        # Index for RAG (if enabled)
+        await self.index_for_rag()
+
         # Analyze codebase
         await self.analyze_codebase()
+
+        # Pass RAG service to batch processor
+        self.batch_processor.rag_service = self.rag_service
+
+        # Pass RAG tracker to batch processor
+        if self.rag_tracker:
+            self.batch_processor.rag_tracker = self.rag_tracker
         
         # Get modules sorted by dependencies
         sorted_modules = [m for m in self.analyzer.get_sorted_by_dependency(reverse=False) 
@@ -128,3 +180,7 @@ class AsyncDocGenerator:
 
         # Dependency usage log (sync is fine)
         self.output_writer.write_dependency_usage(self.batch_processor.dependency_usage_log)
+
+        # RAG usage report (if RAG was enabled)
+        if self.rag_tracker:
+            self.rag_tracker.write_report()

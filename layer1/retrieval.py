@@ -2,14 +2,19 @@ from typing import List, Dict, Any
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 from qdrant_client.http import models as rest  # Import for scroll
-import settings as cfg
 import numpy as np
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import DocGenConfig
+
+cfg = DocGenConfig.from_env().embedding
 
 class HybridRetriever:
     def __init__(self, storage, embedder):
         self.storage = storage
         self.embedder = embedder
-        self.cross_encoder = CrossEncoder(cfg.CROSS_ENCODER_MODEL)
+        self.cross_encoder = CrossEncoder(cfg.cross_encoder_model)
         self.bm25 = None
         self.bm25_chunks = []
 
@@ -64,15 +69,15 @@ class HybridRetriever:
             
             # Same folder → 1.5x boost
             if payload.get("folder_path", "") == top_folder:
-                candidate["score"] *= cfg.SAME_FOLDER_BOOST
-            
+                candidate["score"] *= cfg.same_folder_boost
+
             # Same file → 2x boost
             if payload["file_path"] == top_file:
-                candidate["score"] *= cfg.SAME_FILE_BOOST
-            
+                candidate["score"] *= cfg.same_file_boost
+
             # Test file → 0.01x penalty (demote heavily)
             if payload.get("is_test", False):
-                candidate["score"] *= cfg.TEST_PENALTY
+                candidate["score"] *= cfg.test_penalty
         
         return candidates
     

@@ -206,7 +206,7 @@ class OutputWriter:
             with open(dep_used_path, "w") as outf:
                 outf.write("Dependency usage report\n")
                 outf.write("="*80 + "\n\n")
-                
+
                 if dependency_usage_log:
                     for module in sorted(dependency_usage_log.keys()):
                         data = dependency_usage_log[module]
@@ -222,3 +222,17 @@ class OutputWriter:
                     print(f"⚠️ No dependency usage data found to aggregate\n")
         except Exception as e:
             print(f"⚠️ Failed to write dependency used file: {e}\n")
+
+    def write_rag_usage(self, rag_tracker) -> None:
+        """
+        Write RAG usage report.
+
+        Note: This is called by async_doc_generator, not directly used here.
+        The actual writing is done by RAGUsageTracker.write_report().
+        This method is kept for API consistency with other write_* methods.
+
+        Args:
+            rag_tracker: RAGUsageTracker instance
+        """
+        if rag_tracker:
+            rag_tracker.write_report()

@@ -1,13 +1,140 @@
 """Module-level documentation and review prompts."""
 
-from typing import List
+from typing import List, Dict, Any, Optional
+
+
+def _format_rag_context(rag_context: Optional[List[Dict[str, Any]]]) -> str:
+    """Format RAG context for inclusion in prompt."""
+    if not rag_context:
+        return ""
+
+    items = []
+    for i, chunk in enumerate(rag_context[:5], 1):  # Max 5 items
+        code_preview = chunk.get("code", "")[:500]
+        if len(chunk.get("code", "")) > 500:
+            code_preview += "\n# ... truncated ..."
+
+        items.append(f"""
+### {i}. `{chunk.get('name', 'unknown')}` ({chunk.get('file_path', '?')}:{chunk.get('start_line', '?')}-{chunk.get('end_line', '?')})
+Type: {chunk.get('entity_type', 'unknown')}
+Purpose: {chunk.get('enriched_text', 'N/A')[:200]}
+```python
+{code_preview}
+```
+""")
+
+    return f"""
+Related Code from Codebase (for context only - do NOT document these):
+{''.join(items)}
+"""
+
+
+def get_initial_documentation_prompt(
+    file: str,
+    dependencies: List[str],
+    dependency_context: str,
+    module_docstring: Optional[str] = None,
+    entity_names: Optional[List[str]] = None,
+    rag_context: Optional[List[Dict[str, Any]]] = None
+) -> str:
+    """
+    Generate INITIAL prompt with minimal context for adaptive documentation.
+
+    This prompt provides only the module name, docstring, and entity names.
+    The LLM is expected to use tools to retrieve specific function/class details
+    as needed, rather than receiving all code upfront.
+
+    Args:
+        file: Module filename
+        dependencies: List of imported dependencies
+        dependency_context: Formatted dependency documentation
+        module_docstring: Optional module-level docstring
+        entity_names: Optional list of function/class names in this module
+        rag_context: Optional RAG-retrieved related code from other files
+
+    Returns:
+        Formatted LLM prompt with minimal context and tool usage instructions
+    """
+    rag_section = _format_rag_context(rag_context)
+
+    # Format entity list
+    entity_list = ""
+    if entity_names:
+        entity_list = "\n".join(f"  - {name}" for name in entity_names[:20])  # Max 20 entities
+    else:
+        entity_list = "  (Entity list not available)"
+
+    return f"""
+You are documenting the module **{file}** using adaptive retrieval.
+
+AVAILABLE INFORMATION
+----------------------
+
+Module Docstring:
+{module_docstring if module_docstring else "None"}
+
+Entities in this module:
+{entity_list}
+
+Dependencies: {", ".join(dependencies) if dependencies else "None"}
+
+Dependency Documentation (context only):
+{dependency_context}
+
+{rag_section}
+
+YOUR TASK
+--------
+
+You have MINIMAL context above. This is intentional - you should retrieve
+specific code as needed using the available tools:
+
+**Available Tools:**
+- `get_function_details(module, function_name)` - Get full source code for a specific function
+- `get_class_details(module, class_name)` - Get full source code and methods for a specific class
+- `get_module_overview(module, top_k)` - Get overview of module including key functions/classes
+- `find_usage_patterns(entity_name, limit)` - Find where a function/class is used elsewhere
+- `get_dependency_exports(dependency_module)` - Get main exports from a dependency
+
+**Workflow:**
+1. Review the available information (docstring, entity list, dependencies)
+2. If you have ENOUGH context to write accurate documentation, write it now
+3. If you NEED more details (e.g., specific function code, class methods), use the tools
+4. You can call multiple tools in one response if needed
+
+OUTPUT FORMAT
+-------------
+Return a JSON object with EXACTLY this schema:
+
+{{
+  "summary": "2-3 sentence high-level overview of this module's purpose",
+  "responsibility": "What this module does (its core responsibility)",
+  "key_functions": [
+    {{
+      "name": "function_name",
+      "purpose": "what it does in 1 sentence"
+    }}
+  ],
+  "dependency_usage": "How this module uses its dependencies (if any)",
+  "exports": ["list of main classes/functions this module provides to others"]
+}}
+
+Guidelines:
+- Use tools proactively if you need more information
+- Do NOT invent behavior not present in the code
+- Focus on THIS module's unique responsibility (not its dependencies)
+- If you can't find information about an entity, document what you know and note the limitation
+
+Ensure the JSON is well-formed and parsable.
+"""
 
 
 def get_module_documentation_prompt(file: str,
                                      deps: List[str],
                                      dependency_context: str,
                                      code_context: str,
-                                     reviewer_suggestions: str = None) -> str:
+                                     reviewer_suggestions: str = None,
+                                     rag_context: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Generate LLM prompt for module-level documentation.
 
@@ -17,10 +144,13 @@ def get_module_documentation_prompt(file: str,
         dependency_context: Formatted dependency documentation
         code_context: Source code chunks
         reviewer_suggestions: Optional feedback from previous review
+        rag_context: Optional RAG-retrieved related code from other files
 
     Returns:
         Formatted LLM prompt for module documentation
     """
+    rag_section = _format_rag_context(rag_context)
+
     return f"""
 You are an automated documentation agent for a module.
 
@@ -49,7 +179,7 @@ Dependency Documentation (for context only):
 Source Code:
 Language: python
 {code_context}
-
+{rag_section}
 Reviewer Suggestions:
 {reviewer_suggestions if reviewer_suggestions else "None"}
 
