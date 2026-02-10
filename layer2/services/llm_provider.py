@@ -2,7 +2,7 @@ import os
 import asyncio
 from openai import AsyncOpenAI, OpenAI
 from dotenv import load_dotenv
-from typing import Dict, List, Callable, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Callable, Optional, Any, Tuple, TYPE_CHECKING
 import json
 
 if TYPE_CHECKING:
@@ -301,3 +301,156 @@ Guidelines:
 Ensure the JSON is well-formed and parsable.
 """
         return await self.generate_async(prompt)
+
+    async def generate_hybrid_rag_reasoner_async(
+        self,
+        messages: List[Dict[str, Any]],
+        synthesis_section: dict,
+        base_context: str,
+        plan_context: str,
+        tools: List[Dict[str, Any]],
+        tool_handler: Callable,
+        max_iterations: int = None
+    ) -> Tuple[str, str]:
+        """
+        Two-phase generation: Chat model with RAG tool calling, then Reasoner synthesis.
+
+        Phase 1: Chat model uses tools to gather additional context
+        Phase 2: Reasoner model synthesizes final documentation
+
+        Args:
+            messages: Initial messages for Phase 1 (system + user prompts)
+            synthesis_section: Section dict (title, purpose, style)
+            base_context: Static context gathered before this call
+            plan_context: Overall plan context (project type, audience)
+            tools: Tool definitions for Phase 1
+            tool_handler: Async callable for tool execution
+            max_iterations: Max tool iterations for Phase 1
+
+        Returns:
+            Tuple of (final_content, gathered_context)
+        """
+        if max_iterations is None:
+            max_iterations = self._rag_config.max_tool_iterations
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 1: Context Gathering with Chat Model + Tools
+        # ═══════════════════════════════════════════════════════════════
+
+        working_messages = list(messages)
+        gathered_context_parts = []
+
+        for iteration in range(max_iterations):
+            try:
+                response = await self.async_client.chat.completions.create(
+                    model=self.chat_model,
+                    messages=working_messages,
+                    tools=tools if tools else None,
+                    tool_choice="auto" if tools else None,
+                    temperature=self.temperature
+                )
+
+                message = response.choices[0].message
+
+                if message.tool_calls:
+                    # Execute tool calls and collect results
+                    working_messages.append({
+                        "role": "assistant",
+                        "content": message.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            }
+                            for tc in message.tool_calls
+                        ]
+                    })
+
+                    for tool_call in message.tool_calls:
+                        try:
+                            result = await tool_handler(tool_call)
+                            # Track gathered context
+                            args = json.loads(tool_call.function.arguments)
+                            query = args.get("query", "unknown")
+                            gathered_context_parts.append(f"## RAG Search: {query}\n{result}")
+                        except Exception as e:
+                            result = f"Tool execution error: {str(e)}"
+
+                        working_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result
+                        })
+
+                    continue
+                else:
+                    # No more tool calls - Phase 1 complete
+                    break
+
+            except Exception as e:
+                # On error, continue to Phase 2 with what we have
+                break
+
+        gathered_context = "\n\n---\n\n".join(gathered_context_parts)
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 2: Synthesis with Reasoner Model
+        # ═══════════════════════════════════════════════════════════════
+
+        synthesis_prompt = self._build_synthesis_prompt(
+            section=synthesis_section,
+            base_context=base_context,
+            gathered_context=gathered_context,
+            plan_context=plan_context
+        )
+
+        final_content = await self.generate_with_reasoner_async(synthesis_prompt)
+
+        return final_content, gathered_context
+
+    def _build_synthesis_prompt(
+        self,
+        section: dict,
+        base_context: str,
+        gathered_context: str,
+        plan_context: str
+    ) -> str:
+        """
+        Build the Phase 2 synthesis prompt for the Reasoner model.
+
+        Combines base context, RAG-gathered context, and section requirements
+        with anti-hallucination guidelines.
+        """
+        return f"""You are generating documentation for a Python project.
+
+## Section Requirements
+**Title:** {section.get('title', 'Untitled')}
+**Purpose:** {section.get('purpose', 'No purpose specified')}
+**Style:** {section.get('style', 'narrative')}
+
+## Plan Context
+{plan_context}
+
+## Base Context (Static)
+{base_context}
+
+## Additional Context (From RAG Search)
+{gathered_context if gathered_context else "(No additional context gathered)"}
+
+---
+
+## Anti-Hallucination Rules
+1. ONLY document what is explicitly shown in the context above
+2. If information is missing, state that clearly rather than inventing details
+3. Use actual function names, class names, and file paths from the context
+4. Do not invent APIs, parameters, or behaviors not shown in the code
+5. When showing code examples, base them on actual patterns in the context
+
+## Output
+Generate the documentation section following the specified style.
+Start directly with the content (no section title header needed - it will be added separately).
+"""

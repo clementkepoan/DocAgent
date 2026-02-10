@@ -40,6 +40,7 @@ class GenerationConfig:
     use_reasoner: bool = True
     enable_logging: bool = True
     parallel_execution: bool = True
+    use_hybrid_rag_reasoner: bool = True  # Phase 1: Chat+RAG, Phase 2: Reasoner synthesis
 
 
 @dataclass
@@ -122,6 +123,7 @@ class DocGenConfig:
                 use_reasoner=os.environ.get("USE_REASONER", "true").lower() == "true",
                 enable_logging=os.environ.get("ENABLE_LOGGING", "true").lower() == "true",
                 parallel_execution=os.environ.get("PARALLEL_EXECUTION", "true").lower() == "true",
+                use_hybrid_rag_reasoner=os.environ.get("USE_HYBRID_RAG_REASONER", "true").lower() == "true",
             ),
             output=OutputConfig(
                 output_dir=os.environ.get("OUTPUT_DIR", "./output"),

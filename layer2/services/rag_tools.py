@@ -45,6 +45,67 @@ SEARCH_TOOL = {
 }
 
 
+# Phase 1 exploration prompt for hybrid RAG + Reasoner mode
+EXPLORATION_SYSTEM_PROMPT = """
+## Phase 1: Context Gathering Mode
+
+You are gathering context from a codebase to write documentation.
+Your job is to search for relevant modules, code, and documentation using the search_codebase tool.
+
+**Your task:**
+1. Make 2-4 targeted searches based on the section's purpose and requirements
+2. Focus on finding code examples, API details, and relevant module documentation
+3. DO NOT write the final documentation - just gather context
+
+**Search strategy:**
+- Search for key concepts mentioned in the section purpose
+- Look for related modules and their implementations
+- Find code patterns and examples that support the section
+
+After gathering enough context, stop making tool calls. Your search results will be passed to a synthesis phase.
+"""
+
+
+def get_exploration_system_prompt() -> str:
+    """Get the Phase 1 exploration system prompt."""
+    return EXPLORATION_SYSTEM_PROMPT
+
+
+def get_exploration_prompt(section: dict, base_context: str, plan_context: str) -> str:
+    """
+    Generate Phase 1 exploration prompt for hybrid mode.
+
+    Args:
+        section: Section being generated (title, purpose, style, required_context)
+        base_context: Static context already gathered
+        plan_context: Overall plan context (project type, audience)
+
+    Returns:
+        User prompt for Phase 1 context gathering
+    """
+    return f"""## Section to Write
+**Title:** {section.get('title', 'Untitled')}
+**Purpose:** {section.get('purpose', 'No purpose specified')}
+**Style:** {section.get('style', 'narrative')}
+**Required Context:** {section.get('required_context', [])}
+
+## Plan Context
+{plan_context}
+
+## Base Context Already Available
+{base_context[:3000] if len(base_context) > 3000 else base_context}
+
+---
+
+Now use the search_codebase tool to gather additional context needed for this section.
+Focus on finding:
+1. Relevant source code and implementations
+2. Module documentation
+3. Code patterns and examples
+
+Make 2-4 targeted searches, then stop."""
+
+
 # System prompt addition for agentic section generation
 AGENTIC_SYSTEM_PROMPT_ADDITION = """
 

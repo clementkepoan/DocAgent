@@ -15,6 +15,8 @@ from layer2.services.rag_tools import (
     RAGToolHandler,
     get_rag_tools,
     get_agentic_system_prompt,
+    get_exploration_system_prompt,
+    get_exploration_prompt,
     parse_rag_context_requests,
     prefetch_rag_context
 )
@@ -253,7 +255,8 @@ async def generate_single_section(
     generated_sections: dict = None,
     use_reasoner: bool = True,  # Use DeepSeek Reasoner for better quality
     llm_config: "LLMConfig" = None,
-    enable_rag: bool = True  # Enable agentic RAG tool calling
+    enable_rag: bool = True,  # Enable agentic RAG tool calling
+    use_hybrid: bool = False  # Use hybrid RAG + Reasoner mode
 ) -> Tuple[str, str, Optional[str]]:
     """
     Generate a single documentation section.
@@ -263,6 +266,7 @@ async def generate_single_section(
                       Recommended for final documentation generation.
         llm_config: Optional LLM configuration.
         enable_rag: If True, enables agentic RAG tool calling for section generation.
+        use_hybrid: If True, uses hybrid mode: Phase 1 (Chat+RAG) then Phase 2 (Reasoner).
 
     Returns:
         (section_id, content, warning)
@@ -302,7 +306,32 @@ async def generate_single_section(
 
     # Call LLM with semaphore
     async with semaphore:
-        if enable_rag and not use_reasoner:
+        if use_hybrid:
+            # Hybrid mode: Phase 1 (Chat+RAG) then Phase 2 (Reasoner)
+            rag_handler = get_rag_handler()
+            rag_tools = get_rag_tools()
+
+            # Build Phase 1 exploration messages
+            exploration_messages = [
+                {"role": "system", "content": get_exploration_system_prompt()},
+                {"role": "user", "content": get_exploration_prompt(section, context_data, plan_context)}
+            ]
+
+            # Two-phase generation
+            content, gathered_context = await llm.generate_hybrid_rag_reasoner_async(
+                messages=exploration_messages,
+                synthesis_section=section,
+                base_context=context_data,
+                plan_context=plan_context,
+                tools=rag_tools,
+                tool_handler=rag_handler.handle_tool_call
+            )
+
+            # Append gathered context info to context_data for logging
+            if gathered_context:
+                context_data += f"\n\n--- HYBRID RAG GATHERED CONTEXT ---\n{gathered_context}"
+
+        elif enable_rag and not use_reasoner:
             # Use agentic generation with RAG tools
             # Note: Reasoner model doesn't support tool calling, so we only use
             # agentic mode when use_reasoner=False
@@ -389,6 +418,9 @@ async def execute_documentation_plan(
     if use_reasoner is None:
         use_reasoner = config.generation.use_reasoner if config else True
 
+    # Resolve use_hybrid from config or default
+    use_hybrid = config.generation.use_hybrid_rag_reasoner if config else False
+
     llm_config = config.llm if config else None
 
     # Use configured output directory
@@ -406,11 +438,13 @@ async def execute_documentation_plan(
     plan_context = f"Project type: {plan['project_type']}, Audience: {plan['target_audience']}"
 
     # Get model name for logging
-    if llm_config:
-        model_name = llm_config.reasoner_model if use_reasoner else llm_config.chat_model
+    if use_hybrid:
+        mode_name = "hybrid (chat+RAG → reasoner)"
+    elif llm_config:
+        mode_name = llm_config.reasoner_model if use_reasoner else llm_config.chat_model
     else:
-        model_name = "deepseek-reasoner" if use_reasoner else "deepseek-chat"
-    print(f"📝 Executing documentation plan ({len(plan['sections'])} sections) using {model_name}...")
+        mode_name = "deepseek-reasoner" if use_reasoner else "deepseek-chat"
+    print(f"📝 Executing documentation plan ({len(plan['sections'])} sections) using {mode_name}...")
     
     sections_dict = {}  # section_id -> content (also used as generated_sections)
     
@@ -445,7 +479,8 @@ async def execute_documentation_plan(
                         generated_sections=sections_dict.copy(),
                         use_reasoner=use_reasoner,
                         llm_config=llm_config,
-                        enable_rag=enable_rag
+                        enable_rag=enable_rag,
+                        use_hybrid=use_hybrid
                     )
                     tasks.append(task)
                 
@@ -475,7 +510,8 @@ async def execute_documentation_plan(
                     generated_sections=sections_dict,
                     use_reasoner=use_reasoner,
                     llm_config=llm_config,
-                    enable_rag=enable_rag
+                    enable_rag=enable_rag,
+                    use_hybrid=use_hybrid
                 )
                 sections_dict[section_id] = content
         
