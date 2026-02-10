@@ -45,6 +45,7 @@ dependencies:
       - tiktoken
 
       # Utilities
+      - watchdog
       - typer
       - httpx
       - docker
@@ -58,6 +59,4 @@ dependencies:
       - python-dotenv
       - pytest
       - ruff
-      
-      - tiktoken
 

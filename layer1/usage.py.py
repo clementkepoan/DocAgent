@@ -1,9 +1,7 @@
 # usage.py (modified)
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DocGenConfig
+import settings as cfg
 from chunking import CodeChunker
 from enrichment import ChunkEnricher
 from embeddings import EmbeddingGenerator
@@ -86,10 +84,9 @@ def test_pipeline():
 
 if __name__ == "__main__":
     import httpx
-
-    cfg = DocGenConfig.from_env().embedding
+    
     try:
-        response = httpx.get(f"{cfg.qdrant_url}/", timeout=2.0)
+        response = httpx.get(f"{cfg.QDRANT_URL}/", timeout=2.0)
         if response.status_code == 200:
             test_pipeline()
         else:

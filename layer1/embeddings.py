@@ -1,19 +1,14 @@
 from openai import OpenAI
 from typing import List, Union
 import tiktoken
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DocGenConfig
-
-cfg = DocGenConfig.from_env().embedding
+import settings as cfg
 
 class EmbeddingGenerator:
     def __init__(self):
-        self.client = OpenAI(api_key=cfg.openai_api_key)
-        self.model = cfg.embedding_model
+        self.client = OpenAI(api_key=cfg.OPENAI_API_KEY)
+        self.model = cfg.EMBEDDING_MODEL
         self.tokenizer = tiktoken.encoding_for_model(self.model)
-        self.max_tokens = cfg.max_chunk_tokens
+        self.max_tokens = cfg.MAX_CHUNK_TOKENS
     
     def generate(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """

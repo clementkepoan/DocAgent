@@ -4,23 +4,18 @@ from qdrant_client.http import models as rest
 from typing import List, Dict, Any, Optional
 import uuid
 import hashlib
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DocGenConfig
-
-cfg = DocGenConfig.from_env().embedding
+import settings as cfg
 
 class QdrantStorage:
     def __init__(self):
         self.client = QdrantClient(
-            url=cfg.qdrant_url,
-            api_key=cfg.qdrant_api_key,
+            url=cfg.QDRANT_URL,
+            api_key=cfg.QDRANT_API_KEY,
             prefer_grpc=False  # Use HTTP for compatibility
         )
-        self.collection_name = cfg.collection_name
+        self.collection_name = cfg.COLLECTION_NAME
         self._ensure_collection()
-
+    
     def _ensure_collection(self):
         """Create collection if it doesn't exist"""
         collections = self.client.get_collections().collections
@@ -28,7 +23,7 @@ class QdrantStorage:
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
-                    size=cfg.embedding_dimensions,
+                    size=cfg.EMBEDDING_DIMENSIONS,
                     distance=Distance.COSINE
                 )
             )

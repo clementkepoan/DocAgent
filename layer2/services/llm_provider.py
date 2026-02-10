@@ -2,7 +2,7 @@ import os
 import asyncio
 from openai import AsyncOpenAI, OpenAI
 from dotenv import load_dotenv
-from typing import Dict, List, TYPE_CHECKING, Any
+from typing import Dict, List, TYPE_CHECKING
 import json
 
 if TYPE_CHECKING:
@@ -45,66 +45,6 @@ class LLMProvider:
         )
 
         return response.choices[0].message.content
-
-    async def generate_async_with_tools(
-        self,
-        messages: List[Dict[str, str]],
-        tools: List[Dict[str, Any]],
-        model: str = None
-    ) -> Dict[str, Any]:
-        """
-        Asynchronous LLM call with tool/function calling support.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys
-            tools: List of tool definitions for function calling
-            model: Optional model override (defaults to self.chat_model)
-
-        Returns:
-            Message object that may contain:
-            - content: str (final response)
-            - tool_calls: List[ToolCall] (if LLM wants to use tools)
-        """
-        model = model or self.chat_model
-
-        response = await self.async_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            temperature=self.temperature
-        )
-
-        return response.choices[0].message
-
-    def generate_with_tools(
-        self,
-        messages: List[Dict[str, str]],
-        tools: List[Dict[str, Any]],
-        model: str = None
-    ) -> Dict[str, Any]:
-        """
-        Synchronous LLM call with tool/function calling support.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys
-            tools: List of tool definitions for function calling
-            model: Optional model override (defaults to self.chat_model)
-
-        Returns:
-            Message object that may contain:
-            - content: str (final response)
-            - tool_calls: List[ToolCall] (if LLM wants to use tools)
-        """
-        model = model or self.chat_model
-
-        response = self.sync_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            temperature=self.temperature
-        )
-
-        return response.choices[0].message
 
     async def generate_with_reasoner_async(self, prompt: str) -> str:
         """
