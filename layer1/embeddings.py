@@ -1,14 +1,17 @@
 from openai import OpenAI
 from typing import List, Union
 import tiktoken
-import settings as cfg
+from config import get_config, EmbeddingConfig
+
 
 class EmbeddingGenerator:
-    def __init__(self):
-        self.client = OpenAI(api_key=cfg.OPENAI_API_KEY)
-        self.model = cfg.EMBEDDING_MODEL
+    def __init__(self, config: EmbeddingConfig = None):
+        if config is None:
+            config = get_config().embedding
+        self.client = OpenAI(api_key=config.openai_api_key)
+        self.model = config.embedding_model
         self.tokenizer = tiktoken.encoding_for_model(self.model)
-        self.max_tokens = cfg.MAX_CHUNK_TOKENS
+        self.max_tokens = config.max_chunk_tokens
     
     def generate(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """

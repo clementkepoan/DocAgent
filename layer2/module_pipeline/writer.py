@@ -130,7 +130,8 @@ async def module_write(state: AgentState, llm_config: "LLMConfig" = None) -> Age
         doc_data = parse_doc_json(response)
 
         # Store both structured and formatted versions
-        state["draft_doc"] = format_structured_doc(file, doc_data)
+        state["doc_data"] = doc_data  # Store structured JSON for indexing
+        state["draft_doc"] = format_structured_doc(file, doc_data)  # Keep formatted for output
     except ValueError as e:
         # Fallback: store raw response if JSON parsing fails
         print(f"⚠️ Failed to parse structured doc for {file}: {e}")

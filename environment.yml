@@ -26,6 +26,7 @@ dependencies:
       - tree-sitter
       - tree-sitter-languages
       - tree-sitter-python
+      - tree_sitter_language_pack
 
 
       # Embeddings & reranking
@@ -50,6 +51,9 @@ dependencies:
       - httpx
       - docker
       - inflection
+
+      # RAG chunking
+      - chonkie
 
       # Parser visualization
       - networkx

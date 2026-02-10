@@ -2,7 +2,7 @@ import os
 import asyncio
 from openai import AsyncOpenAI, OpenAI
 from dotenv import load_dotenv
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List, Callable, Optional, Any, TYPE_CHECKING
 import json
 
 if TYPE_CHECKING:
@@ -25,6 +25,10 @@ class LLMProvider:
         self.temperature = config.temperature
         self.async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
         self.sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+
+        # Load RAG config for max iterations
+        from config import get_config
+        self._rag_config = get_config().rag
 
     def generate(self, prompt: str) -> str:
         """Synchronous LLM call"""
@@ -136,6 +140,106 @@ Guidelines:
 Ensure the JSON is well-formed and parsable.
 """
         return self.generate(prompt)
+
+    async def generate_with_tools_async(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        tool_handler: Callable,
+        max_iterations: int = None
+    ) -> str:
+        """
+        Agentic generation with tool calling support.
+
+        KEY FIX for infinite loop bug:
+        - If LLM returns text (no tool_call) → DONE (return content)
+        - If LLM returns tool_call → execute, add result, continue loop
+        - Max iterations as safety net
+
+        Args:
+            messages: Conversation messages (system + user)
+            tools: List of tool definitions (OpenAI format)
+            tool_handler: Async callable that takes tool_call and returns result string
+            max_iterations: Maximum agentic turns. Defaults to settings.
+
+        Returns:
+            Final text response from LLM
+        """
+        if max_iterations is None:
+            max_iterations = self._rag_config.max_tool_iterations
+
+        # Work with a copy to avoid mutating original
+        working_messages = list(messages)
+
+        for iteration in range(max_iterations):
+            try:
+                response = await self.async_client.chat.completions.create(
+                    model=self.chat_model,
+                    messages=working_messages,
+                    tools=tools if tools else None,
+                    tool_choice="auto" if tools else None,
+                    temperature=self.temperature
+                )
+
+                message = response.choices[0].message
+
+                # Check for tool calls
+                if message.tool_calls:
+                    # LLM wants to call tools - execute them
+                    working_messages.append({
+                        "role": "assistant",
+                        "content": message.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            }
+                            for tc in message.tool_calls
+                        ]
+                    })
+
+                    # Execute each tool call
+                    for tool_call in message.tool_calls:
+                        try:
+                            result = await tool_handler(tool_call)
+                        except Exception as e:
+                            result = f"Tool execution error: {str(e)}"
+
+                        working_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result
+                        })
+
+                    # Continue loop - LLM will process tool results
+                    continue
+
+                else:
+                    # No tool call = final answer
+                    # This is the KEY fix: text response means we're done
+                    return message.content or ""
+
+            except Exception as e:
+                # On error, try to return last assistant message or error
+                for msg in reversed(working_messages):
+                    if msg.get("role") == "assistant" and msg.get("content"):
+                        return msg["content"]
+                return f"Generation error: {str(e)}"
+
+        # Safety: max iterations reached
+        # Try to get last meaningful content
+        for msg in reversed(working_messages):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                return msg["content"]
+            if msg.get("role") == "tool" and msg.get("content"):
+                # Last resort: return tool results as context indication
+                return f"[Max iterations reached. Last tool result:]\n{msg['content'][:1000]}"
+
+        return "[Max tool iterations reached without final response]"
 
     async def generate_scc_overview_async(self, scc_modules: List[str], code_chunks_dict: Dict[str, str]) -> str:
         """

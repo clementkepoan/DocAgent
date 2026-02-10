@@ -4,14 +4,25 @@ Plan Execution Agent
 
 Executes documentation plan by generating sections with focused context.
 Supports both sequential and parallel generation modes.
+
+Includes agentic RAG: LLM can call search_codebase tool for more context.
 """
 
 from layer2.services.llm_provider import LLMProvider
 from layer2.prompts.plan_prompts import get_section_generation_prompt
 from layer2.schemas.documentation import DocumentationPlan, DocumentationSection
+from layer2.services.rag_tools import (
+    RAGToolHandler,
+    get_rag_tools,
+    get_agentic_system_prompt,
+    parse_rag_context_requests,
+    prefetch_rag_context
+)
 from layer1.config_reader import ConfigFileReader
+from layer1.parent_child_retriever import ParentChildRetriever
 import asyncio
 import os
+import json
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 
@@ -19,6 +30,7 @@ if TYPE_CHECKING:
     from config import LLMConfig, DocGenConfig
 
 _default_llm = None
+_rag_handler = None
 
 
 def get_llm(config: "LLMConfig" = None) -> LLMProvider:
@@ -29,6 +41,14 @@ def get_llm(config: "LLMConfig" = None) -> LLMProvider:
     if _default_llm is None:
         _default_llm = LLMProvider()
     return _default_llm
+
+
+def get_rag_handler() -> RAGToolHandler:
+    """Get or create RAG tool handler instance."""
+    global _rag_handler
+    if _rag_handler is None:
+        _rag_handler = RAGToolHandler()
+    return _rag_handler
 
 
 class GenerationLogger:
@@ -232,7 +252,8 @@ async def generate_single_section(
     total_sections: int = 0,
     generated_sections: dict = None,
     use_reasoner: bool = True,  # Use DeepSeek Reasoner for better quality
-    llm_config: "LLMConfig" = None
+    llm_config: "LLMConfig" = None,
+    enable_rag: bool = True  # Enable agentic RAG tool calling
 ) -> Tuple[str, str, Optional[str]]:
     """
     Generate a single documentation section.
@@ -241,6 +262,7 @@ async def generate_single_section(
         use_reasoner: If True, uses DeepSeek Reasoner model for complex reasoning.
                       Recommended for final documentation generation.
         llm_config: Optional LLM configuration.
+        enable_rag: If True, enables agentic RAG tool calling for section generation.
 
     Returns:
         (section_id, content, warning)
@@ -252,6 +274,18 @@ async def generate_single_section(
         section, analyzer, folder_docs, folder_tree, module_docs,
         generated_sections=generated_sections
     )
+
+    # Pre-fetch any rag: prefixed context requests
+    required_context = section.get('required_context', [])
+    rag_queries = parse_rag_context_requests(required_context)
+    if rag_queries:
+        rag_handler = get_rag_handler()
+        for query in rag_queries:
+            try:
+                rag_result = await rag_handler.execute_search_tool(query)
+                context_data += f"\n\n## RAG Search: {query}\n{rag_result}"
+            except Exception as e:
+                print(f"    ⚠️  RAG search failed for '{query}': {e}")
 
     # Validate context sufficiency
     is_sufficient, warning = validate_context_sufficiency(section, context_data)
@@ -266,13 +300,42 @@ async def generate_single_section(
         plan_context=plan_context
     )
 
-    # Call LLM with semaphore - use reasoner for complex generation
+    # Call LLM with semaphore
     async with semaphore:
-        if use_reasoner:
+        if enable_rag and not use_reasoner:
+            # Use agentic generation with RAG tools
+            # Note: Reasoner model doesn't support tool calling, so we only use
+            # agentic mode when use_reasoner=False
+            rag_handler = get_rag_handler()
+            rag_tools = get_rag_tools()
+
+            # Build system prompt with tool usage instructions
+            system_prompt = get_agentic_system_prompt(
+                f"You are generating documentation for a Python project.\n"
+                f"Plan context: {plan_context}\n"
+                f"Section: {section['title']} ({section['style']})\n"
+                f"Purpose: {section['purpose']}"
+            )
+
+            # Build messages
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+
+            # Agentic generation with tool calling
+            content = await llm.generate_with_tools_async(
+                messages=messages,
+                tools=rag_tools,
+                tool_handler=rag_handler.handle_tool_call
+            )
+        elif use_reasoner:
+            # Use reasoner for complex generation (no tool calling)
             content = await llm.generate_with_reasoner_async(prompt)
         else:
+            # Standard generation without tools
             content = await llm.generate_async(prompt)
-    
+
     # Log if logger provided
     if logger:
         logger.log_section(
@@ -284,7 +347,7 @@ async def generate_single_section(
             response=content,
             context_warning=warning
         )
-    
+
     return section['section_id'], content, warning
 
 
@@ -298,7 +361,8 @@ async def execute_documentation_plan(
     parallel: bool = True,
     enable_logging: bool = True,
     use_reasoner: bool = None,
-    config: "DocGenConfig" = None
+    config: "DocGenConfig" = None,
+    enable_rag: bool = True
 ) -> str:
     """
     Execute the documentation plan by generating each section.
@@ -315,6 +379,8 @@ async def execute_documentation_plan(
         use_reasoner: If True, use DeepSeek Reasoner model for section generation.
                       If None, uses config.generation.use_reasoner or defaults to True.
         config: Optional DocGenConfig for LLM settings.
+        enable_rag: If True, enable agentic RAG for section generation.
+                    LLM can call search_codebase tool for more context.
 
     Returns:
         Complete documentation markdown
@@ -378,7 +444,8 @@ async def execute_documentation_plan(
                         total_sections=len(plan['sections']),
                         generated_sections=sections_dict.copy(),
                         use_reasoner=use_reasoner,
-                        llm_config=llm_config
+                        llm_config=llm_config,
+                        enable_rag=enable_rag
                     )
                     tasks.append(task)
                 
@@ -407,7 +474,8 @@ async def execute_documentation_plan(
                     total_sections=len(plan['sections']),
                     generated_sections=sections_dict,
                     use_reasoner=use_reasoner,
-                    llm_config=llm_config
+                    llm_config=llm_config,
+                    enable_rag=enable_rag
                 )
                 sections_dict[section_id] = content
         

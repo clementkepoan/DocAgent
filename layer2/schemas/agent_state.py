@@ -16,6 +16,9 @@ class AgentState(TypedDict):
     # generated documentation draft
     draft_doc: Optional[str]
 
+    # structured documentation data for RAG indexing
+    doc_data: Optional[dict]
+
     # did reviewer approve?
     review_passed: bool
 

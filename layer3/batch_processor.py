@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+import json
 from typing import List, Dict, Optional, Set, TYPE_CHECKING
 from tqdm import tqdm
 from layer2.schemas.agent_state import AgentState
@@ -12,12 +13,14 @@ from layer3.progress_reporter import ProgressReporter
 
 if TYPE_CHECKING:
     from config import DocGenConfig
+    from layer1.parent_child_indexer import ParentChildIndexer
 
 
 class BatchProcessor:
     """Handles batch processing of modules with parallel execution."""
 
-    def __init__(self, root_path: str, analyzer, semaphore: asyncio.Semaphore, config: "DocGenConfig" = None):
+    def __init__(self, root_path: str, analyzer, semaphore: asyncio.Semaphore,
+                 config: "DocGenConfig" = None, parent_indexer: "ParentChildIndexer" = None):
         # Load config if not provided
         if config is None:
             from config import DocGenConfig
@@ -31,6 +34,7 @@ class BatchProcessor:
         self.final_docs_lock = asyncio.Lock()
         self.failed_modules: List[tuple] = []
         self.dependency_usage_log: Dict = {}
+        self.parent_indexer = parent_indexer  # For RAG indexing
     
     async def process_module(self, module: str, dependencies: List[str], 
                             dependency_docs: List[str], scc_context: Optional[str],
@@ -108,8 +112,22 @@ class BatchProcessor:
                 except Exception as e:
                     return (module, None, False, f"Review retry failed: {e}", {"retrieve": state.get("last_retrieve_time"), "write": state.get("last_write_time"), "review": None})
 
+            # Index to parent collection for RAG if indexer is available
+            if self.parent_indexer and state.get("doc_data"):
+                try:
+                    # Use pre-parsed JSON directly from state
+                    doc_data = state.get("doc_data")
+                    if doc_data:
+                        # Add file path to doc_data
+                        if module in self.analyzer.module_index:
+                            doc_data["file_path"] = str(self.analyzer.module_index[module])
+                        await self.parent_indexer.index_module_docs(module, doc_data)
+                except Exception as idx_err:
+                    # Don't fail the module processing if indexing fails
+                    print(f"   Warning: Parent indexing failed for {module}: {idx_err}")
+
             return (module, state["draft_doc"], True, None, {"retrieve": state.get("last_retrieve_time"), "write": state.get("last_write_time"), "review": state.get("last_review_time")})
-        
+
         except Exception as e:
             return (module, None, False, str(e), {"retrieve": state.get("last_retrieve_time") if 'state' in locals() else None, "write": state.get("last_write_time") if 'state' in locals() else None, "review": state.get("last_review_time") if 'state' in locals() else None})
     

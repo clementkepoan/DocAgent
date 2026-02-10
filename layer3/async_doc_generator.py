@@ -3,6 +3,7 @@
 import asyncio
 from typing import Dict, TYPE_CHECKING
 from layer1.parser import ImportGraph
+from layer1.parent_child_indexer import ParentChildIndexer
 from layer3.scc_manager import SCCManager
 from layer3.batch_processor import BatchProcessor
 from layer3.file_output_writer import OutputWriter
@@ -42,26 +43,42 @@ class AsyncDocGenerator:
         self.analyzer = None
         self.semaphore = asyncio.Semaphore(config.processing.max_concurrent_tasks)
 
+        # Initialize Parent-Child RAG indexer
+        self.parent_child_indexer = ParentChildIndexer(root_path)
+
         # Delegate responsibilities to specialized components (with config)
         self.scc_manager = SCCManager(root_path, self.semaphore, config)
-        self.batch_processor = BatchProcessor(root_path, None, self.semaphore, config)
+        self.batch_processor = BatchProcessor(
+            root_path, None, self.semaphore, config,
+            parent_indexer=self.parent_child_indexer  # Pass indexer for RAG
+        )
         self.output_writer = OutputWriter(config)
         self.reporter = ProgressReporter()
-    
+
     async def analyze_codebase(self) -> None:
-        """Analyze codebase structure and detect cycles."""
+        """Analyze codebase structure, detect cycles, and index code chunks for RAG."""
         print("📊 Analyzing codebase structure...")
         self.analyzer = ImportGraph(self.root_path)
         self.analyzer.analyze()
-        
+
         # Update batch processor with analyzer
         self.batch_processor.analyzer = self.analyzer
-        
+
         # Filter to only actual modules, exclude packages
         self.modules_only = [m for m in self.analyzer.module_index if m not in self.analyzer.packages]
-        
+
         cycles = [scc for scc in self.analyzer.get_sccs() if len(scc) > 1]
         self.reporter.print_analysis_summary(len(self.modules_only), len(self.analyzer.packages), len(cycles))
+
+        # Index code chunks for Parent-Child RAG (children)
+        print("📚 Indexing code chunks for RAG...")
+        try:
+            chunks_indexed = await self.parent_child_indexer.index_all_code_chunks(
+                self.analyzer.module_index
+            )
+            print(f"   Indexed {chunks_indexed} code chunks")
+        except Exception as e:
+            print(f"   Warning: Code chunk indexing failed: {e}")
     
     async def run(self) -> Dict[str, str]:
         """Main orchestration: batch processing by dependency layers."""
